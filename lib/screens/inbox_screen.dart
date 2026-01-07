@@ -48,7 +48,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     final isDark = Provider.of<ThemeManager>(context).themeMode == ThemeMode.dark;
     
     return CupertinoPageScaffold(
-      backgroundColor: isDark ? Colors.black : const Color(0xFFF2F2F7), // رنگ پس‌زمینه استاندارد iOS
+      backgroundColor: isDark ? Colors.black : const Color(0xFFF2F2F7),
       child: CustomScrollView(
         slivers: [
           CupertinoSliverNavigationBar(
@@ -60,9 +60,9 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
             ),
             trailing: CupertinoButton(
               padding: EdgeInsets.zero,
-              child: const Icon(CupertinoIcons.compose),
+              // تغییر آیکون به create چون compose در نسخه‌های قدیمی نیست
+              child: const Icon(CupertinoIcons.create), 
               onPressed: () {
-                 // باز کردن صفحه چت خالی
                  Navigator.push(context, CupertinoPageRoute(
                    builder: (_) => const ChatScreen(address: "", name: "New Message")
                  ));
