@@ -70,7 +70,6 @@ class ChatBubbleModel {
     return ChatBubbleModel(
       id: msg.id.toString(),
       text: body,
-      // FIX: کست کردن دقیق برای جلوگیری از ارور
       date: (msg.date as int?) ?? 0,
       isMe: me,
       type: type,
