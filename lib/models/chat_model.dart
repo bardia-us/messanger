@@ -61,7 +61,6 @@ class ChatBubbleModel {
     
     MsgType type = MsgType.text;
     
-    // تشخیص نوع پیام
     if (body.contains("[Voice Message:")) {
        type = MsgType.voice;
     } else if (body.contains("[Image Sent:") || body.contains("[Photo Shared]")) {
@@ -71,7 +70,7 @@ class ChatBubbleModel {
     return ChatBubbleModel(
       id: msg.id.toString(),
       text: body,
-      // کست کردن دقیق برای جلوگیری از ارور Object
+      // FIX: کست کردن دقیق برای جلوگیری از ارور
       date: (msg.date as int?) ?? 0,
       isMe: me,
       type: type,
