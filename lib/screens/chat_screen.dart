@@ -1,12 +1,16 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_sms_inbox/flutter_sms_inbox.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:record/record.dart'; // نسخه 5
+import 'package:path_provider/path_provider.dart';
+import 'package:audioplayers/audioplayers.dart'; // برای پخش
+import 'package:vibration/vibration.dart';
 import 'package:intl/intl.dart' hide TextDirection;
-import 'dart:ui' as ui;
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/chat_model.dart';
 import '../services/repository.dart';
@@ -15,6 +19,7 @@ class ChatScreen extends StatefulWidget {
   final String address;
   final String name;
   const ChatScreen({super.key, required this.address, required this.name});
+
   @override
   State<ChatScreen> createState() => _ChatScreenState();
 }
@@ -25,240 +30,246 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   final ScrollController _scrollController = ScrollController();
   final ImagePicker _picker = ImagePicker();
   
-  List<ChatMessageDisplay> _messages = [];
-  bool _isComposing = false;
-  bool _isPlusOpen = false;
+  // Audio
+  final AudioRecorder _audioRecorder = AudioRecorder();
+  final AudioPlayer _audioPlayer = AudioPlayer();
   
-  late AnimationController _plusController;
-  late Animation<Offset> _plusOffset;
+  List<ChatBubbleModel> _messages = [];
+  bool _isComposing = false;
+  bool _showPlusMenu = false;
+  bool _isRecording = false;
+  
+  // Animation
+  late AnimationController _animController;
+  late Animation<double> _rotationAnim;
 
   @override
   void initState() {
     super.initState();
-    _plusController = AnimationController(duration: const Duration(milliseconds: 300), vsync: this);
-    _plusOffset = Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _plusController, curve: Curves.decelerate));
+    _animController = AnimationController(duration: const Duration(milliseconds: 200), vsync: this);
+    _rotationAnim = Tween<double>(begin: 0, end: 0.125).animate(CurvedAnimation(parent: _animController, curve: Curves.easeInOut));
     
     _loadMessages();
   }
 
   @override
   void dispose() {
-    _plusController.dispose();
+    _audioRecorder.dispose();
+    _audioPlayer.dispose();
+    _animController.dispose();
     _textController.dispose();
-    _scrollController.dispose();
     super.dispose();
   }
 
-  void _loadMessages() async {
-    final rawMsgs = await _repo.getThread(widget.address);
+  Future<void> _loadMessages() async {
+    final msgs = await _repo.getChatDetails(widget.address);
     if (!mounted) return;
     setState(() {
-      _messages = _processMessages(rawMsgs);
-    });
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (_scrollController.hasClients) _scrollController.jumpTo(0);
+      _messages = msgs.reversed.toList();
     });
   }
 
-  List<ChatMessageDisplay> _processMessages(List<SmsMessage> raw) {
-    List<ChatMessageDisplay> result = [];
-    raw.sort((a, b) => ((a.date as int?) ?? 0).compareTo((b.date as int?) ?? 0));
-    
-    DateTime? lastDate;
-    for (var msg in raw) {
-      final date = DateTime.fromMillisecondsSinceEpoch((msg.date as int?) ?? 0);
-      if (lastDate == null || date.difference(lastDate).inDays >= 1) {
-        result.add(ChatMessageDisplay.divider(DateFormat('MMM d').format(date)));
-      }
-      result.add(ChatMessageDisplay.message(msg));
-      lastDate = date;
-    }
-    return result.reversed.toList();
-  }
-
-  void _sendMessage({String? text, String? customBody}) async {
-    final body = text ?? customBody;
-    if (body == null || body.isEmpty) return;
+  void _sendMessage({String? text}) async {
+    final body = text ?? _textController.text;
+    if (body.trim().isEmpty) return;
 
     _textController.clear();
     setState(() => _isComposing = false);
 
     try {
-      await _repo.sendSms(widget.address, body, null);
+      // پخش صدای ارسال مسیج آیفون (اختیاری)
+      // SystemSound.play(SystemSoundType.click); 
+      
+      await _repo.sendSms(widget.address, body);
+      
+      // اضافه کردن موقت پیام به لیست برای حس سرعت
+      setState(() {
+        _messages.insert(0, ChatBubbleModel(
+          id: "temp",
+          text: body,
+          date: DateTime.now().millisecondsSinceEpoch,
+          isMe: true,
+        ));
+      });
+      
       Future.delayed(const Duration(seconds: 2), _loadMessages);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Failed"), backgroundColor: Colors.red));
+      // Error handling
     }
   }
 
-  Future<void> _openCamera() async {
-    try {
-      final XFile? photo = await _picker.pickImage(source: ImageSource.camera);
-      if (photo != null) _sendMessage(customBody: "[Image Sent: ${photo.name}]");
-    } catch (e) { print(e); }
+  // --- Voice Logic ---
+  Future<void> _startRecording() async {
+    if (await _audioRecorder.hasPermission()) {
+      Vibration.vibrate(duration: 50); // ویبره شروع
+      
+      final dir = await getTemporaryDirectory();
+      final path = '${dir.path}/audio_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      
+      await _audioRecorder.start(const RecordConfig(), path: path);
+      setState(() => _isRecording = true);
+    }
   }
 
-  Future<void> _openGallery() async {
-    try {
-      final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
-      if (image != null) _sendMessage(customBody: "[Photo Shared]");
-    } catch (e) { print(e); }
+  Future<void> _stopRecording() async {
+    if (!_isRecording) return;
+    
+    final path = await _audioRecorder.stop();
+    setState(() => _isRecording = false);
+    Vibration.vibrate(duration: 50); // ویبره پایان
+    
+    if (path != null) {
+      // ارسال پیام (در واقعیت باید آپلود شود، در SMS فقط متن میرود)
+      _sendMessage(text: "[Voice Message: ${path.split('/').last}]");
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+    final bgColor = isDark ? Colors.black : Colors.white;
+
     return CupertinoPageScaffold(
+      backgroundColor: bgColor,
       navigationBar: CupertinoNavigationBar(
-        middle: Text(widget.name),
-        previousPageTitle: "Messages",
+        backgroundColor: bgColor.withOpacity(0.9),
+        border: Border(bottom: BorderSide(color: Colors.grey.withOpacity(0.2))),
+        middle: Column(
+          children: [
+            const SizedBox(height: 8),
+            CircleAvatar(radius: 12, backgroundColor: Colors.grey, child: Text(widget.name.isNotEmpty ? widget.name[0] : "?", style: const TextStyle(fontSize: 10, color: Colors.white))),
+            Text(widget.name, style: TextStyle(fontSize: 12, color: isDark ? Colors.white : Colors.black)),
+          ],
+        ),
+        trailing: CupertinoButton(
+          padding: EdgeInsets.zero,
+          child: const Icon(CupertinoIcons.phone),
+          onPressed: () => launchUrl(Uri.parse("tel:${widget.address}")),
+        ),
       ),
       child: SafeArea(
-        child: Stack(
+        child: Column(
           children: [
-            Column(
-              children: [
-                Expanded(
-                  child: ListView.builder(
-                    reverse: true,
-                    controller: _scrollController,
-                    itemCount: _messages.length,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                    itemBuilder: (ctx, i) {
-                      final item = _messages[i];
-                      if (item.type == MessageItemType.dateDivider) {
-                        return Center(child: Padding(padding: const EdgeInsets.all(8.0), child: Text(item.text, style: const TextStyle(color: Colors.grey, fontSize: 12))));
-                      }
-                      return _buildBubble(item, isDark);
-                    },
-                  ),
-                ),
-                _buildInputArea(isDark),
-              ],
+            Expanded(
+              child: ListView.builder(
+                reverse: true,
+                controller: _scrollController,
+                itemCount: _messages.length,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                itemBuilder: (ctx, i) => _buildBubble(_messages[i], isDark),
+              ),
             ),
-            if (_isPlusOpen) _buildPlusMenu(isDark),
+            
+            _buildInputBar(isDark),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildBubble(ChatMessageDisplay item, bool isDark) {
+  Widget _buildBubble(ChatBubbleModel item, bool isDark) {
     final isMe = item.isMe;
+    final bubbleColor = isMe 
+        ? const Color(0xFF007AFF) // آبی آیفون
+        : (isDark ? const Color(0xFF262628) : const Color(0xFFE9E9EB)); // خاکستری آیفون
+
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.75),
+        margin: const EdgeInsets.symmetric(vertical: 2),
+        constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.7),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: isMe ? Colors.blue : (isDark ? const Color(0xFF262628) : const Color(0xFFE5E5EA)),
+          color: bubbleColor,
           borderRadius: BorderRadius.circular(18).copyWith(
-            bottomRight: isMe ? const Radius.circular(4) : const Radius.circular(18),
-            bottomLeft: isMe ? const Radius.circular(18) : const Radius.circular(4),
+             bottomRight: isMe ? const Radius.circular(2) : const Radius.circular(18),
+             bottomLeft: isMe ? const Radius.circular(18) : const Radius.circular(2),
           ),
         ),
         child: Text(
           item.text,
-          style: TextStyle(color: isMe ? Colors.white : (isDark ? Colors.white : Colors.black), fontSize: 16),
-          textDirection: RegExp(r'[\u0600-\u06FF]').hasMatch(item.text) ? ui.TextDirection.rtl : ui.TextDirection.ltr,
+          style: TextStyle(
+            color: isMe ? Colors.white : (isDark ? Colors.white : Colors.black),
+            fontSize: 16.5,
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildInputArea(bool isDark) {
+  Widget _buildInputBar(bool isDark) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF9F9F9),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          CupertinoButton(
-            padding: EdgeInsets.zero,
-            onPressed: () {
-              setState(() {
-                _isPlusOpen = !_isPlusOpen;
-                if (_isPlusOpen) _plusController.forward(); else _plusController.reverse();
-              });
-            },
-            child: Container(
-              padding: const EdgeInsets.all(4),
-              decoration: const BoxDecoration(color: Colors.grey, shape: BoxShape.circle),
-              child: const Icon(Icons.add, color: Colors.white, size: 20),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: CupertinoTextField(
-              controller: _textController,
-              minLines: 1,
-              maxLines: 5,
-              placeholder: "iMessage",
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: isDark ? Colors.black : Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.grey.shade400),
-              ),
-              style: TextStyle(color: isDark ? Colors.white : Colors.black),
-              onChanged: (val) => setState(() => _isComposing = val.trim().isNotEmpty),
-            ),
-          ),
-          const SizedBox(width: 8),
-          
-          CupertinoButton(
-            padding: EdgeInsets.zero,
-            onPressed: _isComposing ? () => _sendMessage(text: _textController.text) : null,
-            child: Icon(CupertinoIcons.arrow_up_circle_fill, size: 34, color: _isComposing ? CupertinoColors.activeBlue : Colors.grey),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPlusMenu(bool isDark) {
-    return Positioned(
-      bottom: 70,
-      left: 10,
-      child: ScaleTransition(
-        scale: _plusController,
-        child: Container(
-          width: 200,
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF2C2C2E) : Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 10, spreadRadius: 2)],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _menuBtn(Icons.camera_alt, "Camera", Colors.grey, _openCamera),
-              _menuBtn(Icons.photo, "Photos", Colors.blue, _openGallery),
-              _menuBtn(Icons.location_on, "Location", Colors.green, () => _sendMessage(customBody: "📍 My Location")),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _menuBtn(IconData icon, String txt, Color clr, VoidCallback onTap) {
-    return InkWell(
-      onTap: () {
-        setState(() => _isPlusOpen = false);
-        onTap();
-      },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF0F0F0),
+      child: SafeArea(
+        top: false,
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: clr, shape: BoxShape.circle), child: Icon(icon, color: Colors.white, size: 16)),
-            const SizedBox(width: 12),
-            Text(txt, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 16)),
+            // دکمه پلاس با انیمیشن چرخش
+            GestureDetector(
+              onTap: () {
+                setState(() {
+                  _showPlusMenu = !_showPlusMenu;
+                  _showPlusMenu ? _animController.forward() : _animController.reverse();
+                });
+              },
+              child: RotationTransition(
+                turns: _rotationAnim,
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 6),
+                  padding: const EdgeInsets.all(5),
+                  decoration: const BoxDecoration(color: Colors.grey, shape: BoxShape.circle),
+                  child: const Icon(Icons.add, color: Colors.white, size: 20),
+                ),
+              ),
+            ),
+            
+            const SizedBox(width: 10),
+            
+            // فیلد متنی
+            Expanded(
+              child: CupertinoTextField(
+                controller: _textController,
+                minLines: 1,
+                maxLines: 5,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                placeholder: "iMessage",
+                placeholderStyle: const TextStyle(color: Colors.grey),
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.black : Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.grey.withOpacity(0.3)),
+                ),
+                style: TextStyle(color: isDark ? Colors.white : Colors.black, fontSize: 17),
+                onChanged: (v) => setState(() => _isComposing = v.isNotEmpty),
+              ),
+            ),
+            
+            const SizedBox(width: 10),
+            
+            // لاجیک دکمه ارسال / ویس
+            if (_isComposing)
+               GestureDetector(
+                 onTap: () => _sendMessage(),
+                 child: Container(
+                   margin: const EdgeInsets.only(bottom: 5),
+                   padding: const EdgeInsets.all(6),
+                   decoration: const BoxDecoration(color: Color(0xFF007AFF), shape: BoxShape.circle),
+                   child: const Icon(CupertinoIcons.arrow_up, color: Colors.white, size: 20),
+                 ),
+               )
+            else
+               GestureDetector(
+                 onLongPress: _startRecording,
+                 onLongPressUp: _stopRecording,
+                 child: Container(
+                   margin: const EdgeInsets.only(bottom: 6),
+                   child: _isRecording 
+                      ? const Icon(CupertinoIcons.mic_fill, color: Colors.red, size: 28) // در حال ضبط
+                      : const Icon(CupertinoIcons.mic_fill, color: Colors.grey, size: 28), // عادی
+                 ),
+               ),
           ],
         ),
       ),
