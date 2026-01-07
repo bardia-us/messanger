@@ -62,7 +62,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
         if (!threads.containsKey(key)) {
           threads[key] = msg;
         } else {
-          // *** FIX: Cast explicit ***
+          // *** FIX: Cast explicit برای رفع ارور Object ***
           int current = (msg.date as int?) ?? 0;
           int saved = (threads[key]!.date as int?) ?? 0;
           
@@ -81,7 +81,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
           originalAddress: msg.address!,
           normalizedAddress: key,
           name: name,
-          message: msg.body ?? "No Text",
+          message: msg.body ?? "",
           // *** FIX: Cast explicit ***
           date: (msg.date as int?) ?? 0,
           isRead: msg.read ?? false,
