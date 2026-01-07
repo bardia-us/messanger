@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_sms_inbox/flutter_sms_inbox.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:record/record.dart'; // نسخه 4.4.4
+import 'package:record/record.dart'; // نسخه 5.2.0
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart' hide TextDirection;
@@ -27,8 +27,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   final ScrollController _scrollController = ScrollController();
   final ImagePicker _picker = ImagePicker();
   
-  // تغییر برای نسخه 4
-  final Record _audioRecorder = Record();
+  // سینتکس نسخه 5:
+  final AudioRecorder _audioRecorder = AudioRecorder();
 
   List<ChatMessageDisplay> _messages = [];
   bool _isComposing = false;
@@ -50,7 +50,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   @override
   void dispose() {
-    _audioRecorder.dispose(); // آزاد کردن منابع
+    _audioRecorder.dispose();
     _plusController.dispose();
     _textController.dispose();
     _scrollController.dispose();
@@ -64,9 +64,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       _messages = _processMessages(rawMsgs);
     });
     Future.delayed(const Duration(milliseconds: 100), () {
-      if (_scrollController.hasClients) {
-        _scrollController.jumpTo(0);
-      }
+      if (_scrollController.hasClients) _scrollController.jumpTo(0);
     });
   }
 
@@ -97,42 +95,31 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       await _repo.sendSms(widget.address, body, null);
       Future.delayed(const Duration(seconds: 2), _loadMessages);
     } catch (e) {
-      _showError("Failed to send message");
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Failed"), backgroundColor: Colors.red));
     }
   }
 
   Future<void> _openCamera() async {
     try {
       final XFile? photo = await _picker.pickImage(source: ImageSource.camera);
-      if (photo != null) {
-        _sendMessage(customBody: "[Image Sent: ${photo.name}]");
-      }
-    } catch (e) {
-      _showError("Camera error: $e");
-    }
+      if (photo != null) _sendMessage(customBody: "[Image Sent: ${photo.name}]");
+    } catch (e) { print(e); }
   }
 
   Future<void> _openGallery() async {
     try {
       final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
-      if (image != null) {
-        _sendMessage(customBody: "[Photo Shared]");
-      }
-    } catch (e) {
-      _showError("Gallery error: $e");
-    }
+      if (image != null) _sendMessage(customBody: "[Photo Shared]");
+    } catch (e) { print(e); }
   }
 
   Future<void> _startRecording() async {
-    // تغییر سینتکس برای نسخه 4
     if (await _audioRecorder.hasPermission()) {
       final tempDir = await getTemporaryDirectory();
       final path = '${tempDir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
       
-      await _audioRecorder.start(
-        path: path,
-        encoder: AudioEncoder.aacLc,
-      );
+      // سینتکس نسخه 5:
+      await _audioRecorder.start(const RecordConfig(), path: path);
       
       setState(() => _isRecording = true);
       HapticFeedback.mediumImpact();
@@ -141,18 +128,12 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   Future<void> _stopRecording() async {
     if (!_isRecording) return;
-    // تغییر سینتکس برای نسخه 4
     final path = await _audioRecorder.stop();
-    
     setState(() => _isRecording = false);
     if (path != null) {
       HapticFeedback.mediumImpact();
-      _sendMessage(customBody: "[Voice Message: 0:05]"); 
+      _sendMessage(customBody: "[Voice Message]"); 
     }
-  }
-
-  void _showError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.red));
   }
 
   @override
@@ -187,7 +168,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 _buildInputArea(isDark),
               ],
             ),
-            
             if (_isPlusOpen) _buildPlusMenu(isDark),
             if (_isRecording) _buildRecordingOverlay(),
           ],
