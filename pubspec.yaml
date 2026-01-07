@@ -20,15 +20,10 @@ dependencies:
   flutter_contacts: ^1.1.7+1
   
   image_picker: ^1.0.7
-  record: ^5.2.0 # نسخه جدید برای حل مشکل اندروید
-  audioplayers: ^6.0.0
+  record: ^4.4.4 # نسخه 4 پایدارترین است
+  audioplayers: ^5.2.1
   path_provider: ^2.1.2
-  vibration: ^1.8.4
-
-# بخش مهم: اجبار کردن نسخه‌های هماهنگ برای جلوگیری از ارور لینوکس
-dependency_overrides:
-  record_linux: ^1.2.1
-  record_platform_interface: ^1.4.0
+  # vibration حذف شد (از HapticFeedback استفاده میکنیم)
 
 dev_dependencies:
   flutter_test:
