@@ -9,36 +9,67 @@ class SmsRepository {
   final SmsQuery _query = SmsQuery();
   final Map<String, String> _contactCache = {};
 
+  // --- نرمال‌سازی شماره (حل مشکل 09 و +98) ---
+  String normalizePhone(String phone) {
+    // حذف تمام کاراکترهای غیر عددی به جز +
+    String clean = phone.replaceAll(RegExp(r'[^\d+]'), '');
+    
+    // اگر با +98 شروع میشه، بکنش 0
+    if (clean.startsWith('+98')) {
+      clean = '0${clean.substring(3)}';
+    }
+    // اگر با 98 (بدون مثبت) شروع میشه
+    else if (clean.startsWith('98')) {
+      clean = '0${clean.substring(2)}';
+    }
+    // اگر مستقیم با 9 شروع میشه (مثلا 912)
+    else if (clean.startsWith('9')) {
+      clean = '0$clean';
+    }
+    
+    return clean;
+  }
+
+  // درخواست دسترسی‌ها + دیفالت اپ
   Future<bool> requestPermissions() async {
+    // اول پرمیشن‌های خطرناک
     Map<Permission, PermissionStatus> statuses = await [
       Permission.sms,
       Permission.contacts,
       Permission.phone,
-      Permission.notification,
+      Permission.microphone, // برای ویس
+      Permission.notification, // برای نوتیفیکیشن
     ].request();
 
-    bool smsGranted = statuses[Permission.sms]?.isGranted ?? false;
-    bool contactsGranted = statuses[Permission.contacts]?.isGranted ?? false;
-    bool phoneGranted = statuses[Permission.phone]?.isGranted ?? false;
+    bool essentialGranted = (statuses[Permission.sms]?.isGranted ?? false) &&
+                            (statuses[Permission.contacts]?.isGranted ?? false);
 
-    if (smsGranted && contactsGranted && phoneGranted) {
-      try {
-        await platform.invokeMethod('requestDefaultSms');
-      } catch (e) {
-        print("Error requesting default SMS: $e");
+    if (essentialGranted) {
+      // حالا چک کن ببین دیفالت هستیم یا نه
+      bool isDefault = await platform.invokeMethod('isDefaultSms');
+      if (!isDefault) {
+        try {
+          await platform.invokeMethod('requestDefaultSms');
+        } catch (e) {
+          print("Error requesting default SMS: $e");
+        }
       }
       return true;
     }
     return false;
   }
 
-  // اصلاح kinds: استفاده از SmsQueryKind
   Future<List<SmsMessage>> getMessages({String? address}) async {
-    return await _query.querySms(
-      address: address,
+    // اگر آدرس خاصی خواستیم، باید حواسمان به فرمت‌های مختلف باشد
+    // اما کتابخانه filter روی آدرس دقیق دارد. پس بهتره همه رو بگیریم و فیلتر کنیم
+    // یا اینکه بگذاریم خود کتابخانه کارش را بکند.
+    
+    List<SmsMessage> messages = await _query.querySms(
       kinds: [SmsQueryKind.inbox, SmsQueryKind.sent],
+      address: address, // اگر نال باشد همه را می‌دهد
       sort: true,
     );
+    return messages;
   }
 
   Future<void> sendSms(String address, String body, int? subId) async {
@@ -50,6 +81,7 @@ class SmsRepository {
       });
     } on PlatformException catch (e) {
       print("Failed to send SMS via Native: ${e.message}");
+      throw e; // خطا را پرتاب کن تا در UI بفهمیم
     }
   }
 
@@ -63,60 +95,29 @@ class SmsRepository {
     }
   }
 
-  // اصلاح جستجوی مخاطب: حذف پارامتر query که وجود نداشت
   Future<String?> getContactName(String address) async {
-    // نرمال‌سازی شماره (حذف +98 یا 0 اول برای مقایسه بهتر)
-    String normalize(String phone) {
-      return phone
-          .replaceAll(' ', '')
-          .replaceAll('-', '')
-          .replaceAll('+98', '0');
-    }
-
-    if (_contactCache.containsKey(address)) return _contactCache[address];
+    String normalizedAddr = normalizePhone(address);
+    if (_contactCache.containsKey(normalizedAddr)) return _contactCache[normalizedAddr];
 
     try {
-      // این روش همه کانتکت‌ها را می‌گیرد که سنگین است، اما تنها راه با این پکیج است
-      // برای بهینه‌سازی باید این لیست را در شروع برنامه یک بار بگیرید
-      List<Contact> contacts = await FlutterContacts.getContacts(
-        withProperties: true,
-      );
-
-      String target = normalize(address);
-
-      for (var contact in contacts) {
-        for (var phone in contact.phones) {
-          if (normalize(phone.number) == target || phone.number == address) {
-            String name = contact.displayName;
-            _contactCache[address] = name;
-            return name;
-          }
-        }
+      // این بخش سنگین است، بهتر است یک بار کش شود
+      final contact = await FlutterContacts.getContact(normalizedAddr);
+      if (contact != null) {
+         _contactCache[normalizedAddr] = contact.displayName;
+         return contact.displayName;
       }
     } catch (e) {
-      print("Error fetching contact: $e");
+      // خطا در گرفتن کانتکت
     }
     return null;
   }
 
   Color generateColor(String address) {
     final colors = [
-      CupertinoColors.systemIndigo,
-      CupertinoColors.systemPink,
-      CupertinoColors.systemGreen,
-      CupertinoColors.systemTeal,
-      CupertinoColors.systemOrange,
-      CupertinoColors.systemPurple,
+      CupertinoColors.systemIndigo, CupertinoColors.systemPink, CupertinoColors.systemGreen,
+      CupertinoColors.systemTeal, CupertinoColors.systemOrange, CupertinoColors.systemPurple,
+      CupertinoColors.systemBlue, CupertinoColors.systemRed
     ];
-    return colors[address.hashCode % colors.length];
-  }
-
-  // اصلاح markAsRead: استفاده از متد نیتیو چون SmsQuery این قابلیت را ندارد
-  Future<void> markAsRead(String messageId) async {
-    try {
-      await platform.invokeMethod('markAsRead', {'id': messageId});
-    } catch (e) {
-      print("Error marking as read: $e");
-    }
+    return colors[normalizePhone(address).hashCode % colors.length];
   }
 }
