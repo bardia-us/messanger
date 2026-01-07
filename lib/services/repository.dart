@@ -19,7 +19,6 @@ class SmsRepository {
   }
 
   Future<bool> requestPermissions() async {
-    // لیست پرمیشن‌ها بر اساس نسخه اندروید
     List<Permission> perms = [
       Permission.sms,
       Permission.contacts,
@@ -28,16 +27,8 @@ class SmsRepository {
       Permission.camera,
       Permission.notification,
     ];
-
-    // در اندروید 13 به بالا پرمیشن مدیا فرق داره
-    if (Platform.isAndroid) {
-        // برای نسخه های جدید photos و videos جداست
-        // اما image_picker خودش هندل میکنه معمولا
-    }
-
     await perms.request();
     
-    // چک کردن اس‌ام‌اس که حیاتی‌ترینه
     if (await Permission.sms.isGranted) {
       try {
          bool isDefault = await platform.invokeMethod('isDefaultSms');
@@ -50,19 +41,19 @@ class SmsRepository {
     return false;
   }
 
-  // گرفتن همه پیام‌ها (بدون فیلتر)
   Future<List<SmsMessage>> getAllMessages() async {
     try {
+      // این کوئری مطمئن‌ترین روش برای دریافت همه پیام‌هاست
       return await _query.querySms(
         kinds: [SmsQueryKind.inbox, SmsQueryKind.sent],
         sort: true,
       );
     } catch (e) {
+      print("Error fetching: $e");
       return [];
     }
   }
 
-  // گرفتن پیام‌های یک نخ گفتگو
   Future<List<SmsMessage>> getThread(String address) async {
     final all = await getAllMessages();
     final target = normalizePhone(address);
