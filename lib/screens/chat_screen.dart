@@ -62,6 +62,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   List<ChatMessageDisplay> _processMessages(List<SmsMessage> raw) {
     List<ChatMessageDisplay> result = [];
+    // *** FIX: Cast explicit ***
     raw.sort((a, b) => ((a.date as int?) ?? 0).compareTo((b.date as int?) ?? 0));
     
     DateTime? lastDate;
@@ -208,11 +209,10 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           ),
           const SizedBox(width: 8),
           
-          // دکمه ارسال همیشه نمایش داده می‌شود (میکروفون حذف شد)
           CupertinoButton(
             padding: EdgeInsets.zero,
-            child: const Icon(CupertinoIcons.arrow_up_circle_fill, size: 34),
             onPressed: _isComposing ? () => _sendMessage(text: _textController.text) : null,
+            child: Icon(CupertinoIcons.arrow_up_circle_fill, size: 34, color: _isComposing ? CupertinoColors.activeBlue : Colors.grey),
           ),
         ],
       ),
