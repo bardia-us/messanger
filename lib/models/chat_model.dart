@@ -3,8 +3,8 @@ import 'package:flutter_sms_inbox/flutter_sms_inbox.dart';
 
 class ConversationItem {
   final String id;
-  final String address;    // شماره واقعی
-  final String displayId;  // شماره نرمال شده (برای گروه‌بندی)
+  final String address;
+  final String displayId;
   final String? name;
   final String snippet;
   final int date;
@@ -36,7 +36,7 @@ class ConversationItem {
   }
 }
 
-enum MsgType { text, voice, image, date }
+enum MsgType { text, voice, image }
 
 class ChatBubbleModel {
   final String id;
@@ -44,7 +44,7 @@ class ChatBubbleModel {
   final int date;
   final bool isMe;
   final MsgType type;
-  final String? audioPath; // مسیر فایل صوتی (اگر ویس باشد)
+  final String? audioPath;
 
   ChatBubbleModel({
     required this.id,
@@ -55,29 +55,26 @@ class ChatBubbleModel {
     this.audioPath,
   });
 
-  // فکتوری برای تبدیل SMS معمولی به مدل چت
   factory ChatBubbleModel.fromSms(SmsMessage msg) {
     bool me = msg.kind == SmsMessageKind.sent;
     String body = msg.body ?? "";
     
-    // تشخیص نوع پیام از روی متن (چون SMS دیتا ندارد)
     MsgType type = MsgType.text;
-    String? path;
-
-    if (body.startsWith("[Voice:")) {
+    
+    // تشخیص نوع پیام
+    if (body.contains("[Voice Message:")) {
        type = MsgType.voice;
-       // در سناریوی واقعی باید فایل را دانلود کنید، اینجا فقط نشانگر است
-    } else if (body.startsWith("[Image:")) {
+    } else if (body.contains("[Image Sent:") || body.contains("[Photo Shared]")) {
        type = MsgType.image;
     }
 
     return ChatBubbleModel(
       id: msg.id.toString(),
       text: body,
-      date: msg.date ?? 0,
+      // کست کردن دقیق برای جلوگیری از ارور Object
+      date: (msg.date as int?) ?? 0,
       isMe: me,
       type: type,
-      audioPath: path,
     );
   }
 }
