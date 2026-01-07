@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_sms_inbox/flutter_sms_inbox.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
@@ -11,34 +12,36 @@ class SmsRepository {
 
   String normalizePhone(String phone) {
     String clean = phone.replaceAll(RegExp(r'[^\d+]'), '');
-    if (clean.startsWith('+98')) {
-      return '0${clean.substring(3)}';
-    } else if (clean.startsWith('98') && clean.length > 10) {
-      return '0${clean.substring(2)}';
-    } else if (clean.startsWith('9') && clean.length == 10) {
-      return '0$clean';
-    }
+    if (clean.startsWith('+98')) return '0${clean.substring(3)}';
+    if (clean.startsWith('98') && clean.length > 10) return '0${clean.substring(2)}';
+    if (clean.startsWith('9') && clean.length == 10) return '0$clean';
     return clean;
   }
 
   Future<bool> requestPermissions() async {
-    Map<Permission, PermissionStatus> statuses = await [
+    // لیست پرمیشن‌ها بر اساس نسخه اندروید
+    List<Permission> perms = [
       Permission.sms,
       Permission.contacts,
       Permission.phone,
       Permission.microphone,
       Permission.camera,
       Permission.notification,
-    ].request();
+    ];
 
-    bool smsGranted = statuses[Permission.sms]?.isGranted ?? false;
+    // در اندروید 13 به بالا پرمیشن مدیا فرق داره
+    if (Platform.isAndroid) {
+        // برای نسخه های جدید photos و videos جداست
+        // اما image_picker خودش هندل میکنه معمولا
+    }
+
+    await perms.request();
     
-    if (smsGranted) {
+    // چک کردن اس‌ام‌اس که حیاتی‌ترینه
+    if (await Permission.sms.isGranted) {
       try {
          bool isDefault = await platform.invokeMethod('isDefaultSms');
-         if (!isDefault) {
-           await platform.invokeMethod('requestDefaultSms');
-         }
+         if (!isDefault) await platform.invokeMethod('requestDefaultSms');
       } catch (e) {
         print("Error checking default SMS: $e");
       }
@@ -47,21 +50,19 @@ class SmsRepository {
     return false;
   }
 
-  // اصلاح شده: حذف count برای دریافت تمام پیام‌ها
+  // گرفتن همه پیام‌ها (بدون فیلتر)
   Future<List<SmsMessage>> getAllMessages() async {
     try {
-      final messages = await _query.querySms(
+      return await _query.querySms(
         kinds: [SmsQueryKind.inbox, SmsQueryKind.sent],
-        // address: null, // خودکار همه را می‌گیرد
         sort: true,
       );
-      return messages;
     } catch (e) {
-      print("Error fetching all messages: $e");
       return [];
     }
   }
 
+  // گرفتن پیام‌های یک نخ گفتگو
   Future<List<SmsMessage>> getThread(String address) async {
     final all = await getAllMessages();
     final target = normalizePhone(address);
@@ -72,22 +73,18 @@ class SmsRepository {
   }
 
   Future<void> sendSms(String address, String body, int? subId) async {
-    try {
-      await platform.invokeMethod('sendSms', {
-        'address': address,
-        'body': body,
-        'subId': subId,
-      });
-    } on PlatformException catch (e) {
-      throw e;
-    }
+    await platform.invokeMethod('sendSms', {
+      'address': address,
+      'body': body,
+      'subId': subId,
+    });
   }
 
   Future<List<Map<String, dynamic>>> getSimCards() async {
     try {
       final List result = await platform.invokeMethod('getSimCards');
       return result.cast<Map<String, dynamic>>();
-    } on PlatformException catch (e) {
+    } catch (e) {
       return [];
     }
   }
@@ -108,4 +105,8 @@ class SmsRepository {
   Color generateColor(String address) {
     final colors = [
       CupertinoColors.systemIndigo, CupertinoColors.systemPink, CupertinoColors.systemGreen,
-      CupertinoColors.systemTeal, CupertinoColors.systemOrange, C
+      CupertinoColors.systemTeal, CupertinoColors.systemOrange, CupertinoColors.systemPurple,
+    ];
+    return colors[address.hashCode % colors.length];
+  }
+}
