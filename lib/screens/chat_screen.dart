@@ -1,20 +1,18 @@
-import 'dart:ui' as ui; // برای TextDirection
+import 'dart:ui' as ui;
 import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_sms_inbox/flutter_sms_inbox.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:intl/intl.dart' hide TextDirection; // مخفی کردن برای رفع تداخل
+import 'package:intl/intl.dart' hide TextDirection;
 
 import '../models/chat_model.dart';
 import '../services/repository.dart';
 
-// تابع کمکی برای جهت متن
 ui.TextDirection getDirection(String text) {
-  return RegExp(r'[\u0600-\u06FF]').hasMatch(text)
-      ? ui.TextDirection.rtl
-      : ui.TextDirection.ltr;
+  return RegExp(r'[\u0600-\u06FF]').hasMatch(text) ? ui.TextDirection.rtl : ui.TextDirection.ltr;
 }
 
 class ChatScreen extends StatefulWidget {
@@ -25,32 +23,29 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen>
-    with SingleTickerProviderStateMixin {
+class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateMixin {
   final SmsRepository _repo = SmsRepository();
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-
+  
   List<ChatMessageDisplay> _messages = [];
   List<Map<String, dynamic>> _simCards = [];
   int? _selectedSubId;
+  
   late AnimationController _plusController;
   late Animation<Offset> _plusOffset;
+  
   bool _isPlusOpen = false;
   bool _isComposing = false;
+  bool _isRecording = false; // وضعیت ضبط صدا
 
   @override
   void initState() {
     super.initState();
-    _plusController = AnimationController(
-      duration: const Duration(milliseconds: 400),
-      vsync: this,
-    );
+    _plusController = AnimationController(duration: const Duration(milliseconds: 400), vsync: this);
     _plusOffset = Tween<Offset>(begin: const Offset(0, 1), end: Offset.zero)
-        .animate(
-          CurvedAnimation(parent: _plusController, curve: Curves.elasticOut),
-        );
-
+        .animate(CurvedAnimation(parent: _plusController, curve: Curves.elasticOut));
+    
     _loadSims();
     _loadChat();
   }
@@ -66,36 +61,35 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   void _loadChat() async {
-    final rawMsgs = await _repo.getMessages(address: widget.address);
+    final rawMsgs = await _repo.getMessages();
+    // فیلتر کردن دستی چون آدرس ممکن است فرمت‌های مختلف داشته باشد
+    final targetNormal = _repo.normalizePhone(widget.address);
+    
+    final filtered = rawMsgs.where((m) => 
+      m.address != null && _repo.normalizePhone(m.address!) == targetNormal
+    ).toList();
+
     if (mounted) {
       setState(() {
-        _messages = _processRawMessages(rawMsgs);
+        _messages = _processRawMessages(filtered);
       });
-      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+       // اسکرول به پایین با کمی تاخیر برای لود شدن لیست
+       Future.delayed(const Duration(milliseconds: 100), _scrollToBottom);
     }
   }
 
   List<ChatMessageDisplay> _processRawMessages(List<SmsMessage> rawMsgs) {
     List<ChatMessageDisplay> processed = [];
     DateTime? lastMessageDate;
-
-    // اصلاح sort: کست کردن date به int
-    rawMsgs.sort(
-      (a, b) => ((a.date as int?) ?? 0).compareTo((b.date as int?) ?? 0),
-    );
-
+    
+    rawMsgs.sort((a, b) => ((a.date as int?) ?? 0).compareTo((b.date as int?) ?? 0));
+    
     for (var msg in rawMsgs) {
       int dateMillis = (msg.date as int?) ?? 0;
-      DateTime currentMessageDate = DateTime.fromMillisecondsSinceEpoch(
-        dateMillis,
-      );
-
-      if (lastMessageDate == null ||
-          currentMessageDate.difference(lastMessageDate).inHours >= 1) {
-        // استفاده از کانستراکتور divider
-        processed.add(
-          ChatMessageDisplay.divider(_formatDateForDivider(currentMessageDate)),
-        );
+      DateTime currentMessageDate = DateTime.fromMillisecondsSinceEpoch(dateMillis);
+      
+      if (lastMessageDate == null || currentMessageDate.difference(lastMessageDate).inHours >= 1) {
+        processed.add(ChatMessageDisplay.divider(_formatDateForDivider(currentMessageDate)));
       }
       processed.add(ChatMessageDisplay.message(msg));
       lastMessageDate = currentMessageDate;
@@ -105,26 +99,14 @@ class _ChatScreenState extends State<ChatScreen>
 
   String _formatDateForDivider(DateTime date) {
     final now = DateTime.now();
-    if (now.day == date.day &&
-        now.month == date.month &&
-        now.year == date.year) {
-      return "Today";
-    } else if (now.day - date.day == 1 &&
-        now.month == date.month &&
-        now.year == date.year) {
-      return "Yesterday";
-    } else {
-      return DateFormat('MMM d, yyyy').format(date);
-    }
+    if (now.day == date.day && now.month == date.month && now.year == date.year) return "Today";
+    if (now.day - date.day == 1 && now.month == date.month && now.year == date.year) return "Yesterday";
+    return DateFormat('MMM d, yyyy').format(date);
   }
 
   void _scrollToBottom() {
     if (_scrollController.hasClients) {
-      _scrollController.animateTo(
-        0,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
+      _scrollController.animateTo(0, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
     }
   }
 
@@ -132,55 +114,75 @@ class _ChatScreenState extends State<ChatScreen>
     final text = _controller.text;
     if (text.isEmpty) return;
     HapticFeedback.lightImpact();
-
+    
     _controller.clear();
     setState(() => _isComposing = false);
+    
+    try {
+      await _repo.sendSms(widget.address, text, _selectedSubId);
+      
+      // آپدیت سریع UI (خوش‌بینانه)
+      // توجه: پیام واقعی بعد از چند ثانیه توسط لودر اصلی گرفته می‌شود
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text("Sending...", style: TextStyle(color: Colors.white)),
+        backgroundColor: CupertinoColors.activeBlue,
+        duration: Duration(seconds: 1),
+      ));
+      
+      Future.delayed(const Duration(seconds: 3), _loadChat);
+      
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text("Failed to send: $e"),
+        backgroundColor: Colors.red,
+      ));
+    }
+  }
 
-    await _repo.sendSms(widget.address, text, _selectedSubId);
-    Future.delayed(const Duration(seconds: 2), _loadChat);
+  // --- منطق ضبط صدا ---
+  void _startRecording() async {
+    if (await Permission.microphone.request().isGranted) {
+      HapticFeedback.heavyImpact();
+      setState(() => _isRecording = true);
+      // اینجا باید منطق ضبط صدا قرار گیرد (فعلا UI)
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Microphone permission needed")));
+    }
+  }
+
+  void _stopRecording() {
+    if (_isRecording) {
+      HapticFeedback.lightImpact();
+      setState(() => _isRecording = false);
+      // اینجا فایل ضبط شده باید ارسال شود
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Voice Recorded (Simulation)")));
+    }
   }
 
   void _togglePlusMenu() {
     HapticFeedback.selectionClick();
     setState(() {
       _isPlusOpen = !_isPlusOpen;
-      if (_isPlusOpen)
-        _plusController.forward();
-      else
-        _plusController.reverse();
+      if (_isPlusOpen) _plusController.forward(); else _plusController.reverse();
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final isNumeric =
-        double.tryParse(
-          widget.address.replaceAll('+', '').replaceAll(' ', ''),
-        ) !=
-        null;
-
+    
     return CupertinoPageScaffold(
       navigationBar: CupertinoNavigationBar(
         middle: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             CircleAvatar(
-              radius: 10,
-              backgroundColor: Colors.grey,
-              child: Text(
-                widget.name.isNotEmpty ? widget.name[0] : "#",
-                style: const TextStyle(fontSize: 9, color: Colors.white),
-              ),
+              radius: 12, 
+              backgroundColor: Colors.grey, 
+              child: Text(widget.name.isNotEmpty ? widget.name[0] : "#", style: const TextStyle(fontSize: 10, color: Colors.white))
             ),
             const SizedBox(height: 2),
-            Text(
-              widget.name,
-              style: TextStyle(
-                fontSize: 12,
-                color: isDark ? Colors.white : Colors.black,
-              ),
-            ),
+            Text(widget.name, style: TextStyle(fontSize: 12, color: isDark ? Colors.white : Colors.black)),
           ],
         ),
         trailing: CupertinoButton(
@@ -199,10 +201,7 @@ class _ChatScreenState extends State<ChatScreen>
                   child: ListView.builder(
                     reverse: true,
                     controller: _scrollController,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 10,
-                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     itemCount: _messages.length,
                     itemBuilder: (context, index) {
                       final msgDisplay = _messages[index];
@@ -213,23 +212,34 @@ class _ChatScreenState extends State<ChatScreen>
                     },
                   ),
                 ),
-
-                if (isNumeric)
-                  _buildInputBar(isDark)
-                else
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[200],
-                    child: const Text(
-                      "Cannot reply to this sender",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: CupertinoColors.systemGrey),
-                    ),
-                  ),
+                
+                _buildInputBar(isDark),
               ],
             ),
-
+            
             if (_isPlusOpen) _buildPlusPanel(isDark),
+            
+            if (_isRecording) _buildRecordingOverlay(isDark),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRecordingOverlay(bool isDark) {
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.7),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: const Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(CupertinoIcons.mic_fill, color: Colors.red, size: 50),
+            SizedBox(height: 10),
+            Text("Recording...", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
           ],
         ),
       ),
@@ -240,14 +250,7 @@ class _ChatScreenState extends State<ChatScreen>
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Text(
-          text,
-          style: const TextStyle(
-            color: CupertinoColors.systemGrey,
-            fontSize: 11,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
+        child: Text(text, style: const TextStyle(color: CupertinoColors.systemGrey, fontSize: 11, fontWeight: FontWeight.bold)),
       ),
     );
   }
@@ -257,77 +260,46 @@ class _ChatScreenState extends State<ChatScreen>
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Row(
-        mainAxisAlignment: isMe
-            ? MainAxisAlignment.end
-            : MainAxisAlignment.start,
+        mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
         children: [
           if (!isMe) ...[
-            const CircleAvatar(
-              radius: 14,
-              backgroundColor: CupertinoColors.systemGrey4,
-              child: Icon(
-                CupertinoIcons.person_fill,
-                size: 16,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(width: 6),
+             const CircleAvatar(radius: 14, backgroundColor: CupertinoColors.systemGrey4, child: Icon(CupertinoIcons.person_fill, size: 16, color: Colors.white)),
+             const SizedBox(width: 6),
           ],
           Flexible(
             child: GestureDetector(
               onLongPress: () {
                 HapticFeedback.selectionClick();
                 Clipboard.setData(ClipboardData(text: msgDisplay.text));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text("Copied"),
-                    duration: Duration(milliseconds: 500),
-                  ),
-                );
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Copied"), duration: Duration(milliseconds: 500)));
               },
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 decoration: BoxDecoration(
-                  gradient: isMe
-                      ? const LinearGradient(
-                          colors: [Color(0xFF389BFF), Color(0xFF007AFF)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        )
-                      : LinearGradient(
-                          colors: isDark
-                              ? [
-                                  const Color(0xFF262628),
-                                  const Color(0xFF262628),
-                                ]
-                              : [
-                                  const Color(0xFFE9E9EB),
-                                  const Color(0xFFE9E9EB),
-                                ],
-                        ),
+                  gradient: isMe 
+                    ? const LinearGradient(colors: [Color(0xFF389BFF), Color(0xFF007AFF)], begin: Alignment.topLeft, end: Alignment.bottomRight) 
+                    : LinearGradient(colors: isDark ? [const Color(0xFF262628), const Color(0xFF262628)] : [const Color(0xFFE9E9EB), const Color(0xFFE9E9EB)]),
                   borderRadius: BorderRadius.only(
                     topLeft: const Radius.circular(18),
                     topRight: const Radius.circular(18),
-                    bottomLeft: isMe
-                        ? const Radius.circular(18)
-                        : const Radius.circular(4),
-                    bottomRight: isMe
-                        ? const Radius.circular(4)
-                        : const Radius.circular(18),
+                    bottomLeft: isMe ? const Radius.circular(18) : const Radius.circular(4),
+                    bottomRight: isMe ? const Radius.circular(4) : const Radius.circular(18),
                   ),
                 ),
-                child: Text(
-                  msgDisplay.text,
-                  style: TextStyle(
-                    fontSize: 17,
-                    color: isMe
-                        ? Colors.white
-                        : (isDark ? Colors.white : Colors.black),
-                  ),
-                  textDirection: getDirection(msgDisplay.text),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      msgDisplay.text,
+                      style: TextStyle(fontSize: 17, color: isMe ? Colors.white : (isDark ? Colors.white : Colors.black)),
+                      textDirection: getDirection(msgDisplay.text),
+                    ),
+                    if (isMe) 
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Icon(Icons.done_all, size: 12, color: Colors.white.withOpacity(0.7)),
+                      )
+                  ],
                 ),
               ),
             ),
@@ -337,20 +309,12 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
-  // متدهای _buildInputBar و _buildPlusPanel مشابه قبل هستند و نیازی به تغییر نداشتند،
-  // اما باید مطمئن شوید که در انتهای کلاس بسته می‌شوند.
-
   Widget _buildInputBar(bool isDark) {
-    // (کد قبلی اینجا قرار می‌گیرد - بدون تغییر)
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xCC1E1E1E) : const Color(0xCCF9F9F9),
-        border: Border(
-          top: BorderSide(
-            color: isDark ? const Color(0xFF38383A) : const Color(0xFFE5E5EA),
-          ),
-        ),
+        border: Border(top: BorderSide(color: isDark ? const Color(0xFF38383A) : const Color(0xFFE5E5EA))),
       ),
       child: ClipRect(
         child: BackdropFilter(
@@ -365,17 +329,9 @@ class _ChatScreenState extends State<ChatScreen>
                   duration: const Duration(milliseconds: 200),
                   child: Container(
                     margin: const EdgeInsets.only(bottom: 5, right: 10),
-                    width: 32,
-                    height: 32,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFC7C7CC),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      CupertinoIcons.add,
-                      color: CupertinoColors.white,
-                      size: 22,
-                    ),
+                    width: 32, height: 32,
+                    decoration: const BoxDecoration(color: Color(0xFFC7C7CC), shape: BoxShape.circle),
+                    child: const Icon(CupertinoIcons.add, color: CupertinoColors.white, size: 22),
                   ),
                 ),
               ),
@@ -385,29 +341,15 @@ class _ChatScreenState extends State<ChatScreen>
                   minLines: 1,
                   maxLines: 5,
                   placeholder: "iMessage",
-                  placeholderStyle: const TextStyle(
-                    color: CupertinoColors.systemGrey,
-                  ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 9,
-                  ),
+                  placeholderStyle: const TextStyle(color: CupertinoColors.systemGrey),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
                   decoration: BoxDecoration(
-                    color: isDark
-                        ? const Color(0xFF2C2C2E)
-                        : CupertinoColors.white,
+                    color: isDark ? const Color(0xFF2C2C2E) : CupertinoColors.white,
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: const Color(0xFFC7C7CC),
-                      width: 0.5,
-                    ),
+                    border: Border.all(color: const Color(0xFFC7C7CC), width: 0.5),
                   ),
-                  style: TextStyle(
-                    fontSize: 17,
-                    color: isDark ? Colors.white : Colors.black,
-                  ),
-                  onChanged: (text) =>
-                      setState(() => _isComposing = text.trim().isNotEmpty),
+                  style: TextStyle(fontSize: 17, color: isDark ? Colors.white : Colors.black),
+                  onChanged: (text) => setState(() => _isComposing = text.trim().isNotEmpty),
                 ),
               ),
               const SizedBox(width: 6),
@@ -416,27 +358,20 @@ class _ChatScreenState extends State<ChatScreen>
                   onTap: _sendMessage,
                   child: Container(
                     margin: const EdgeInsets.only(bottom: 4),
-                    width: 32,
-                    height: 32,
-                    decoration: const BoxDecoration(
-                      color: CupertinoColors.activeBlue,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      CupertinoIcons.arrow_up,
-                      color: Colors.white,
-                      size: 20,
-                    ),
+                    width: 32, height: 32,
+                    decoration: const BoxDecoration(color: CupertinoColors.activeBlue, shape: BoxShape.circle),
+                    child: const Icon(CupertinoIcons.arrow_up, color: Colors.white, size: 20),
                   ),
                 )
               else
-                const Padding(
-                  padding: EdgeInsets.only(bottom: 6, right: 2),
-                  child: Icon(
-                    CupertinoIcons.waveform,
-                    color: Color(0xFF8E8E93),
-                  ),
-                ),
+                 GestureDetector(
+                   onLongPress: _startRecording,
+                   onLongPressUp: _stopRecording,
+                   child: const Padding(
+                     padding: EdgeInsets.only(bottom: 6, right: 2),
+                     child: Icon(CupertinoIcons.mic_fill, color: Color(0xFF8E8E93)), // آیکون ویس
+                   ),
+                 ),
             ],
           ),
         ),
@@ -445,7 +380,6 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _buildPlusPanel(bool isDark) {
-    // (کد قبلی اینجا قرار می‌گیرد - بدون تغییر)
     return Positioned(
       bottom: 60,
       left: 10,
@@ -454,66 +388,44 @@ class _ChatScreenState extends State<ChatScreen>
         child: Container(
           width: 250,
           decoration: BoxDecoration(
-            color: (isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF2F2F7))
-                .withOpacity(0.98),
+            color: (isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF2F2F7)).withOpacity(0.98),
             borderRadius: BorderRadius.circular(20),
-            boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 20),
-            ],
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 20)],
           ),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _menuItem(
-                CupertinoIcons.camera_fill,
-                "Camera",
-                Colors.grey,
-                isDark,
-              ),
-              _menuItem(
-                CupertinoIcons.photo_fill,
-                "Photos",
-                CupertinoColors.activeBlue,
-                isDark,
-              ),
-              _menuItem(
-                CupertinoIcons.location_solid,
-                "Location",
-                CupertinoColors.systemGreen,
-                isDark,
-              ),
-            ],
+             mainAxisSize: MainAxisSize.min,
+             children: [
+               _menuItem(CupertinoIcons.camera_fill, "Camera", Colors.grey, isDark, () {
+                 // اینجا کدهای باز کردن دوربین
+               }),
+               _menuItem(CupertinoIcons.photo_fill, "Photos", CupertinoColors.activeBlue, isDark, () {
+                 // اینجا کدهای باز کردن گالری
+               }),
+               _menuItem(CupertinoIcons.location_solid, "Location", CupertinoColors.systemGreen, isDark, () {
+                 // اینجا کدهای لوکیشن
+               }),
+             ],
           ),
         ),
       ),
     );
   }
 
-  Widget _menuItem(IconData icon, String title, Color color, bool isDark) {
+  Widget _menuItem(IconData icon, String title, Color color, bool isDark, VoidCallback onTap) {
     return GestureDetector(
-      onTap: () => HapticFeedback.lightImpact(),
+      onTap: () {
+        HapticFeedback.lightImpact();
+        onTap();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("$title selected"), duration: const Duration(milliseconds: 500)));
+      },
       child: Container(
         padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: Colors.grey.withOpacity(0.2)),
-          ),
-        ),
+        decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Colors.grey.withOpacity(0.2)))),
         child: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-              child: Icon(icon, color: Colors.white, size: 18),
-            ),
+            Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: color, shape: BoxShape.circle), child: Icon(icon, color: Colors.white, size: 18)),
             const SizedBox(width: 12),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 17,
-                color: isDark ? Colors.white : Colors.black,
-              ),
-            ),
+            Text(title, style: TextStyle(fontSize: 17, color: isDark ? Colors.white : Colors.black)),
           ],
         ),
       ),
