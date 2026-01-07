@@ -5,10 +5,9 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:record/record.dart'; // نسخه 5
+import 'package:record/record.dart'; // نسخه 4.4.4
 import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
-import 'package:vibration/vibration.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:url_launcher/url_launcher.dart';
 
@@ -30,8 +29,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   final ScrollController _scrollController = ScrollController();
   final ImagePicker _picker = ImagePicker();
   
-  // در نسخه 5 نام کلاس AudioRecorder است
-  final AudioRecorder _audioRecorder = AudioRecorder();
+  // نسخه 4 از کلاس Record استفاده میکند
+  final Record _audioRecorder = Record();
   final AudioPlayer _audioPlayer = AudioPlayer();
   
   List<ChatBubbleModel> _messages = [];
@@ -93,16 +92,16 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     }
   }
 
-  // --- Voice Logic (نسخه 5) ---
+  // --- Voice Logic (نسخه 4) ---
   Future<void> _startRecording() async {
     if (await _audioRecorder.hasPermission()) {
-      Vibration.vibrate(duration: 50);
+      HapticFeedback.heavyImpact(); // جایگزین ویبره
       
       final dir = await getTemporaryDirectory();
       final path = '${dir.path}/audio_${DateTime.now().millisecondsSinceEpoch}.m4a';
       
-      // سینتکس نسخه 5:
-      await _audioRecorder.start(const RecordConfig(), path: path);
+      // سینتکس نسخه 4:
+      await _audioRecorder.start(path: path);
       setState(() => _isRecording = true);
     }
   }
@@ -112,7 +111,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     
     final path = await _audioRecorder.stop();
     setState(() => _isRecording = false);
-    Vibration.vibrate(duration: 50);
+    HapticFeedback.heavyImpact(); // جایگزین ویبره
     
     if (path != null) {
       _sendMessage(text: "[Voice Message: ${path.split('/').last}]");
