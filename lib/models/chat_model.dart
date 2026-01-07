@@ -44,7 +44,6 @@ class ChatBubbleModel {
   final int date;
   final bool isMe;
   final MsgType type;
-  final String? audioPath;
 
   ChatBubbleModel({
     required this.id,
@@ -52,7 +51,6 @@ class ChatBubbleModel {
     required this.date,
     required this.isMe,
     this.type = MsgType.text,
-    this.audioPath,
   });
 
   factory ChatBubbleModel.fromSms(SmsMessage msg) {
