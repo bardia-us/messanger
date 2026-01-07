@@ -1,11 +1,8 @@
-import 'dart:io';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_sms_inbox/flutter_sms_inbox.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:record/record.dart'; // نسخه 5.2.0
-import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'dart:ui' as ui;
@@ -27,13 +24,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   final ScrollController _scrollController = ScrollController();
   final ImagePicker _picker = ImagePicker();
   
-  // در نسخه 5 نام کلاس به AudioRecorder تغییر کرده است
-  final AudioRecorder _audioRecorder = AudioRecorder();
-
   List<ChatMessageDisplay> _messages = [];
   bool _isComposing = false;
   bool _isPlusOpen = false;
-  bool _isRecording = false;
   
   late AnimationController _plusController;
   late Animation<Offset> _plusOffset;
@@ -50,7 +43,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   @override
   void dispose() {
-    _audioRecorder.dispose(); // حتما باید دیسپوز شود
     _plusController.dispose();
     _textController.dispose();
     _scrollController.dispose();
@@ -63,17 +55,13 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     setState(() {
       _messages = _processMessages(rawMsgs);
     });
-    // اسکرول به پایین
     Future.delayed(const Duration(milliseconds: 100), () {
-      if (_scrollController.hasClients) {
-        _scrollController.jumpTo(0);
-      }
+      if (_scrollController.hasClients) _scrollController.jumpTo(0);
     });
   }
 
   List<ChatMessageDisplay> _processMessages(List<SmsMessage> raw) {
     List<ChatMessageDisplay> result = [];
-    // مرتب‌سازی با کست دقیق
     raw.sort((a, b) => ((a.date as int?) ?? 0).compareTo((b.date as int?) ?? 0));
     
     DateTime? lastDate;
@@ -106,56 +94,15 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   Future<void> _openCamera() async {
     try {
       final XFile? photo = await _picker.pickImage(source: ImageSource.camera);
-      if (photo != null) {
-        _sendMessage(customBody: "[Image Sent: ${photo.name}]");
-      }
-    } catch (e) {
-      print(e);
-    }
+      if (photo != null) _sendMessage(customBody: "[Image Sent: ${photo.name}]");
+    } catch (e) { print(e); }
   }
 
   Future<void> _openGallery() async {
     try {
       final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
-      if (image != null) {
-        _sendMessage(customBody: "[Photo Shared]");
-      }
-    } catch (e) {
-      print(e);
-    }
-  }
-
-  Future<void> _startRecording() async {
-    try {
-      if (await _audioRecorder.hasPermission()) {
-        final tempDir = await getTemporaryDirectory();
-        final path = '${tempDir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
-        
-        // سینتکس نسخه 5 برای شروع ضبط
-        await _audioRecorder.start(const RecordConfig(), path: path);
-        
-        setState(() => _isRecording = true);
-        HapticFeedback.mediumImpact();
-      }
-    } catch (e) {
-      print("Error starting record: $e");
-    }
-  }
-
-  Future<void> _stopRecording() async {
-    if (!_isRecording) return;
-    try {
-      final path = await _audioRecorder.stop();
-      setState(() => _isRecording = false);
-      
-      if (path != null) {
-        HapticFeedback.mediumImpact();
-        // ارسال ویس به صورت پیام متنی (چون SMS مدیا ساپورت نمیکنه)
-        _sendMessage(customBody: "[Voice Message: 0:05]"); 
-      }
-    } catch (e) {
-      print("Error stopping record: $e");
-    }
+      if (image != null) _sendMessage(customBody: "[Photo Shared]");
+    } catch (e) { print(e); }
   }
 
   @override
@@ -190,9 +137,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 _buildInputArea(isDark),
               ],
             ),
-            
             if (_isPlusOpen) _buildPlusMenu(isDark),
-            if (_isRecording) _buildRecordingOverlay(),
           ],
         ),
       ),
@@ -263,21 +208,12 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           ),
           const SizedBox(width: 8),
           
-          if (_isComposing)
-            CupertinoButton(
-              padding: EdgeInsets.zero,
-              child: const Icon(CupertinoIcons.arrow_up_circle_fill, size: 34),
-              onPressed: () => _sendMessage(text: _textController.text),
-            )
-          else
-            GestureDetector(
-              onLongPress: _startRecording,
-              onLongPressUp: _stopRecording,
-              child: const Padding(
-                padding: EdgeInsets.only(bottom: 6, right: 4),
-                child: Icon(CupertinoIcons.mic_fill, color: Colors.grey, size: 28),
-              ),
-            ),
+          // دکمه ارسال همیشه نمایش داده می‌شود (میکروفون حذف شد)
+          CupertinoButton(
+            padding: EdgeInsets.zero,
+            child: const Icon(CupertinoIcons.arrow_up_circle_fill, size: 34),
+            onPressed: _isComposing ? () => _sendMessage(text: _textController.text) : null,
+          ),
         ],
       ),
     );
@@ -323,23 +259,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
             Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: clr, shape: BoxShape.circle), child: Icon(icon, color: Colors.white, size: 16)),
             const SizedBox(width: 12),
             Text(txt, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 16)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRecordingOverlay() {
-    return Center(
-      child: Container(
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(color: Colors.red.withOpacity(0.9), borderRadius: BorderRadius.circular(20)),
-        child: const Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.mic, color: Colors.white, size: 40),
-            SizedBox(height: 8),
-            Text("Recording...", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
           ],
         ),
       ),
