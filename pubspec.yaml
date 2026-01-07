@@ -9,7 +9,6 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  # UI & Utilities
   cupertino_icons: ^1.0.6
   intl: ^0.19.0
   provider: ^6.1.1
@@ -17,16 +16,14 @@ dependencies:
   permission_handler: ^11.1.0
   url_launcher: ^6.2.1
   
-  # SMS & Contacts
   flutter_sms_inbox: ^1.0.3
   flutter_contacts: ^1.1.7+1
   
-  # Media & Hardware
   image_picker: ^1.0.7
-  record: ^5.1.0 # نسخه پایدار جدید
-  audioplayers: ^5.2.1 # برای پخش ویس
+  record: ^4.4.4 # نسخه پایدار
+  audioplayers: ^5.2.1
   path_provider: ^2.1.2
-  vibration: ^1.8.4 # برای حس واقعی دکمه‌ها
+  vibration: ^1.8.4
 
 dev_dependencies:
   flutter_test:
