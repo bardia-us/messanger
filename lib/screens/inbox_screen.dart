@@ -1,6 +1,5 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_sms_inbox/flutter_sms_inbox.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../models/chat_model.dart';
@@ -17,14 +16,14 @@ class InboxScreen extends StatefulWidget {
 
 class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
   final SmsRepository _repo = SmsRepository();
-  List<ConversationDisplayItem> _conversations = [];
-  bool _isLoading = true;
+  List<ConversationItem> _items = [];
+  bool _loading = true;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _initAndLoad();
+    _refresh();
   }
 
   @override
@@ -35,113 +34,55 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _loadConversations();
-    }
+    if (state == AppLifecycleState.resumed) _refresh();
   }
 
-  Future<void> _initAndLoad() async {
-    await _repo.requestPermissions();
-    await _loadConversations();
-  }
-
-  Future<void> _loadConversations() async {
-    if (!mounted) return;
-    setState(() => _isLoading = true);
-
-    try {
-      final messages = await _repo.getAllMessages();
-      
-      Map<String, SmsMessage> threads = {};
-      
-      for (var msg in messages) {
-        if (msg.address == null || msg.address!.isEmpty) continue;
-        
-        String key = _repo.normalizePhone(msg.address!);
-        
-        if (!threads.containsKey(key)) {
-          threads[key] = msg;
-        } else {
-          // *** FIX: Cast explicit برای رفع ارور Object ***
-          int current = (msg.date as int?) ?? 0;
-          int saved = (threads[key]!.date as int?) ?? 0;
-          
-          if (current > saved) {
-            threads[key] = msg;
-          }
-        }
-      }
-
-      List<ConversationDisplayItem> result = [];
-      for (var key in threads.keys) {
-        var msg = threads[key]!;
-        String? name = await _repo.getContactName(key);
-        
-        result.add(ConversationDisplayItem(
-          originalAddress: msg.address!,
-          normalizedAddress: key,
-          name: name,
-          message: msg.body ?? "",
-          // *** FIX: Cast explicit ***
-          date: (msg.date as int?) ?? 0,
-          isRead: msg.read ?? false,
-          avatarColor: _repo.generateColor(key),
-        ));
-      }
-
-      result.sort((a, b) => b.date.compareTo(a.date));
-
-      if (mounted) {
-        setState(() {
-          _conversations = result;
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      print("Error in inbox: $e");
-      if (mounted) setState(() => _isLoading = false);
-    }
+  Future<void> _refresh() async {
+    await _repo.checkAndRequestPermissions();
+    final data = await _repo.getConversations();
+    if (mounted) setState(() { _items = data; _loading = false; });
   }
 
   @override
   Widget build(BuildContext context) {
-    final themeManager = Provider.of<ThemeManager>(context);
-    final isDark = themeManager.themeMode == ThemeMode.dark;
-
+    final isDark = Provider.of<ThemeManager>(context).themeMode == ThemeMode.dark;
+    
     return CupertinoPageScaffold(
+      backgroundColor: isDark ? Colors.black : const Color(0xFFF2F2F7), // رنگ پس‌زمینه استاندارد iOS
       child: CustomScrollView(
         slivers: [
           CupertinoSliverNavigationBar(
             largeTitle: const Text("Messages"),
             leading: CupertinoButton(
               padding: EdgeInsets.zero,
-              child: const Text("Edit"),
+              child: const Text("Edit", style: TextStyle(color: CupertinoColors.activeBlue)),
               onPressed: () {},
             ),
             trailing: CupertinoButton(
               padding: EdgeInsets.zero,
-              child: const Icon(CupertinoIcons.square_pencil),
+              child: const Icon(CupertinoIcons.compose),
               onPressed: () {
-                Navigator.of(context).push(CupertinoPageRoute(
-                  builder: (_) => const ChatScreen(address: "", name: "New Message")
-                )).then((_) => _loadConversations());
+                 // باز کردن صفحه چت خالی
+                 Navigator.push(context, CupertinoPageRoute(
+                   builder: (_) => const ChatScreen(address: "", name: "New Message")
+                 ));
               },
             ),
           ),
           
-          if (_isLoading)
+          if (_loading)
             const SliverFillRemaining(child: Center(child: CupertinoActivityIndicator()))
-          else if (_conversations.isEmpty)
-             SliverFillRemaining(
+          else if (_items.isEmpty)
+            SliverFillRemaining(
               child: Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Text("No Messages", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                    const Text("No Messages", style: TextStyle(fontSize: 18, color: Colors.grey)),
                     const SizedBox(height: 10),
                     CupertinoButton.filled(
                       child: const Text("Refresh"),
-                      onPressed: _initAndLoad,
+                      onPressed: _refresh,
                     )
                   ],
                 ),
@@ -150,10 +91,8 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
           else
             SliverList(
               delegate: SliverChildBuilderDelegate(
-                (context, index) {
-                  return _buildConversationItem(_conversations[index], isDark);
-                },
-                childCount: _conversations.length,
+                (context, index) => _buildRow(_items[index], isDark),
+                childCount: _items.length,
               ),
             ),
         ],
@@ -161,40 +100,42 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildConversationItem(ConversationDisplayItem item, bool isDark) {
+  Widget _buildRow(ConversationItem item, bool isDark) {
     return GestureDetector(
-      onTap: () async {
-        await Navigator.push(
-          context,
-          CupertinoPageRoute(
-            builder: (_) => ChatScreen(address: item.originalAddress, name: item.displayName),
-          ),
-        );
-        _loadConversations();
+      onTap: () {
+        Navigator.push(context, CupertinoPageRoute(
+          builder: (_) => ChatScreen(address: item.address, name: item.title),
+        )).then((_) => _refresh());
       },
       child: Container(
         color: isDark ? Colors.black : Colors.white,
-        padding: const EdgeInsets.only(left: 16, top: 12, bottom: 12),
+        padding: const EdgeInsets.only(left: 20),
         child: Row(
           children: [
             if (!item.isRead)
-              Container(
-                margin: const EdgeInsets.only(right: 8),
-                width: 10, height: 10,
-                decoration: const BoxDecoration(color: Colors.blue, shape: BoxShape.circle),
-              ),
+               Container(
+                 margin: const EdgeInsets.only(right: 10),
+                 width: 10, height: 10,
+                 decoration: const BoxDecoration(color: CupertinoColors.activeBlue, shape: BoxShape.circle),
+               ),
             
-            CircleAvatar(
-              radius: 24,
-              backgroundColor: item.avatarColor,
-              child: Text(item.initials, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            Container(
+              width: 50, height: 50,
+              decoration: BoxDecoration(
+                color: item.name == null ? Colors.grey[400] : item.color,
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Text(item.initials, style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w500)),
             ),
-            const SizedBox(width: 12),
+            
+            const SizedBox(width: 15),
+            
             Expanded(
               child: Container(
-                padding: const EdgeInsets.only(bottom: 12, right: 16),
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 0),
                 decoration: BoxDecoration(
-                  border: Border(bottom: BorderSide(color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFE5E5EA))),
+                  border: Border(bottom: BorderSide(color: Colors.grey.withOpacity(0.2), width: 0.5)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -202,16 +143,28 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Expanded(child: Text(item.displayName, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : Colors.black))),
-                        Text(_formatDate(item.date), style: const TextStyle(color: Colors.grey, fontSize: 14)),
+                         Text(item.title, style: TextStyle(
+                           color: isDark ? Colors.white : Colors.black,
+                           fontSize: 17,
+                           fontWeight: FontWeight.w600,
+                         )),
+                         Padding(
+                           padding: const EdgeInsets.only(right: 15),
+                           child: Text(_formatDate(item.date), style: const TextStyle(
+                             color: Colors.grey, fontSize: 14
+                           )),
+                         ),
                       ],
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      item.message, 
-                      maxLines: 2, 
-                      overflow: TextOverflow.ellipsis, 
-                      style: const TextStyle(color: Colors.grey, fontSize: 15)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 20),
+                      child: Text(
+                        item.snippet,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.grey, fontSize: 15, height: 1.2),
+                      ),
                     ),
                   ],
                 ),
@@ -227,7 +180,8 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     if (millis == 0) return "";
     final date = DateTime.fromMillisecondsSinceEpoch(millis);
     final now = DateTime.now();
-    if (now.day == date.day) return DateFormat('HH:mm').format(date);
-    return DateFormat('MM/dd').format(date);
+    if (now.difference(date).inDays == 0 && now.day == date.day) return DateFormat('h:mm a').format(date);
+    if (now.difference(date).inDays < 7) return DateFormat('EEEE').format(date);
+    return DateFormat('M/d/yy').format(date);
   }
 }
