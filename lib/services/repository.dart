@@ -9,9 +9,8 @@ class SmsRepository {
   final SmsQuery _query = SmsQuery();
   final Map<String, String> _contactCache = {};
 
-  // نرمال‌سازی شماره تلفن برای یکی کردن +98 و 09
   String normalizePhone(String phone) {
-    String clean = phone.replaceAll(RegExp(r'[^\d+]'), ''); // حذف فاصله و خط تیره
+    String clean = phone.replaceAll(RegExp(r'[^\d+]'), '');
     if (clean.startsWith('+98')) {
       return '0${clean.substring(3)}';
     } else if (clean.startsWith('98') && clean.length > 10) {
@@ -23,7 +22,6 @@ class SmsRepository {
   }
 
   Future<bool> requestPermissions() async {
-    // درخواست همه دسترسی‌های لازم برای دوربین، میکروفون و اس‌مس
     Map<Permission, PermissionStatus> statuses = await [
       Permission.sms,
       Permission.contacts,
@@ -36,7 +34,6 @@ class SmsRepository {
     bool smsGranted = statuses[Permission.sms]?.isGranted ?? false;
     
     if (smsGranted) {
-      // درخواست دیفالت شدن
       try {
          bool isDefault = await platform.invokeMethod('isDefaultSms');
          if (!isDefault) {
@@ -50,13 +47,12 @@ class SmsRepository {
     return false;
   }
 
-  // گرفتن تمام پیام‌ها بدون فیلتر آدرس (برای پر شدن اینباکس)
+  // اصلاح شده: حذف count برای دریافت تمام پیام‌ها
   Future<List<SmsMessage>> getAllMessages() async {
     try {
       final messages = await _query.querySms(
         kinds: [SmsQueryKind.inbox, SmsQueryKind.sent],
-        address: null, // نال یعنی همه پیام‌ها رو بده
-        count: -1, // -1 یعنی محدودیت تعداد نداشته باش
+        // address: null, // خودکار همه را می‌گیرد
         sort: true,
       );
       return messages;
@@ -66,11 +62,9 @@ class SmsRepository {
     }
   }
 
-  // گرفتن پیام‌های یک شخص خاص
   Future<List<SmsMessage>> getThread(String address) async {
     final all = await getAllMessages();
     final target = normalizePhone(address);
-    // فیلتر دستی قدرتمند
     return all.where((msg) {
       if (msg.address == null) return false;
       return normalizePhone(msg.address!) == target;
@@ -85,7 +79,6 @@ class SmsRepository {
         'subId': subId,
       });
     } on PlatformException catch (e) {
-      print("Native Send Error: ${e.message}");
       throw e;
     }
   }
@@ -102,26 +95,17 @@ class SmsRepository {
   Future<String?> getContactName(String address) async {
     String normalized = normalizePhone(address);
     if (_contactCache.containsKey(normalized)) return _contactCache[normalized];
-
     try {
-      // تلاش برای پیدا کردن نام با فرمت‌های مختلف
       final contact = await FlutterContacts.getContact(normalized);
       if (contact != null) {
         _contactCache[normalized] = contact.displayName;
         return contact.displayName;
       }
-    } catch (e) {
-      // ignore
-    }
-    return null; // اگر پیدا نشد نال برگردون تا خود شماره نمایش داده بشه
+    } catch (e) {}
+    return null;
   }
 
   Color generateColor(String address) {
     final colors = [
       CupertinoColors.systemIndigo, CupertinoColors.systemPink, CupertinoColors.systemGreen,
-      CupertinoColors.systemTeal, CupertinoColors.systemOrange, CupertinoColors.systemPurple,
-      const Color(0xFF007AFF), const Color(0xFFFF3B30)
-    ];
-    return colors[address.hashCode % colors.length];
-  }
-}
+      CupertinoColors.systemTeal, CupertinoColors.systemOrange, C
