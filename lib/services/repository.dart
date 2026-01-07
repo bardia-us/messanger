@@ -4,12 +4,12 @@ import 'package:flutter_sms_inbox/flutter_sms_inbox.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/cupertino.dart';
+// این خط حیاتی است برای شناختن مدل‌ها
+import '../models/chat_model.dart'; 
 
 class SmsRepository {
   static const platform = MethodChannel('com.example.messages/sms');
   final SmsQuery _query = SmsQuery();
-  
-  // کش برای سرعت بالا
   static final Map<String, String> _nameCache = {};
 
   String normalize(String phone) {
@@ -21,7 +21,6 @@ class SmsRepository {
   }
 
   Future<bool> checkAndRequestPermissions() async {
-    // لیست دقیق پرمیشن‌ها
     var statuses = await [
       Permission.sms,
       Permission.contacts,
@@ -57,7 +56,6 @@ class SmsRepository {
         if (m.address == null) continue;
         String key = normalize(m.address!);
         
-        // فقط جدیدترین پیام هر شخص
         if (!threads.containsKey(key)) {
           threads[key] = m;
         }
@@ -74,13 +72,12 @@ class SmsRepository {
           displayId: key,
           name: name,
           snippet: m.body ?? "",
-          date: m.date ?? 0,
+          date: (m.date as int?) ?? 0, // کست صحیح
           isRead: m.read ?? false,
           color: _getColor(key),
         ));
       }
       
-      // مرتب‌سازی زمانی
       items.sort((a, b) => b.date.compareTo(a.date));
       return items;
       
