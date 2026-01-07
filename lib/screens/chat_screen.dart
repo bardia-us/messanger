@@ -5,9 +5,9 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:record/record.dart'; // نسخه 5
+import 'package:record/record.dart'; // نسخه 4.4.4
 import 'package:path_provider/path_provider.dart';
-import 'package:audioplayers/audioplayers.dart'; // برای پخش
+import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:url_launcher/url_launcher.dart';
@@ -30,8 +30,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   final ScrollController _scrollController = ScrollController();
   final ImagePicker _picker = ImagePicker();
   
-  // Audio
-  final AudioRecorder _audioRecorder = AudioRecorder();
+  // نسخه 4 از کلاس Record استفاده میکند
+  final Record _audioRecorder = Record();
   final AudioPlayer _audioPlayer = AudioPlayer();
   
   List<ChatBubbleModel> _messages = [];
@@ -39,7 +39,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   bool _showPlusMenu = false;
   bool _isRecording = false;
   
-  // Animation
   late AnimationController _animController;
   late Animation<double> _rotationAnim;
 
@@ -77,12 +76,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     setState(() => _isComposing = false);
 
     try {
-      // پخش صدای ارسال مسیج آیفون (اختیاری)
-      // SystemSound.play(SystemSoundType.click); 
-      
       await _repo.sendSms(widget.address, body);
-      
-      // اضافه کردن موقت پیام به لیست برای حس سرعت
       setState(() {
         _messages.insert(0, ChatBubbleModel(
           id: "temp",
@@ -91,22 +85,22 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           isMe: true,
         ));
       });
-      
       Future.delayed(const Duration(seconds: 2), _loadMessages);
     } catch (e) {
-      // Error handling
+      // Error
     }
   }
 
-  // --- Voice Logic ---
   Future<void> _startRecording() async {
     if (await _audioRecorder.hasPermission()) {
-      Vibration.vibrate(duration: 50); // ویبره شروع
+      Vibration.vibrate(duration: 50);
       
       final dir = await getTemporaryDirectory();
       final path = '${dir.path}/audio_${DateTime.now().millisecondsSinceEpoch}.m4a';
       
-      await _audioRecorder.start(const RecordConfig(), path: path);
+      // سینتکس نسخه 4: فقط path میگیره (بدون config)
+      await _audioRecorder.start(path: path);
+      
       setState(() => _isRecording = true);
     }
   }
@@ -116,11 +110,10 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     
     final path = await _audioRecorder.stop();
     setState(() => _isRecording = false);
-    Vibration.vibrate(duration: 50); // ویبره پایان
+    Vibration.vibrate(duration: 50);
     
     if (path != null) {
-      // ارسال پیام (در واقعیت باید آپلود شود، در SMS فقط متن میرود)
-      _sendMessage(text: "[Voice Message: ${path.split('/').last}]");
+      _sendMessage(text: "[Voice Message]");
     }
   }
 
@@ -170,8 +163,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   Widget _buildBubble(ChatBubbleModel item, bool isDark) {
     final isMe = item.isMe;
     final bubbleColor = isMe 
-        ? const Color(0xFF007AFF) // آبی آیفون
-        : (isDark ? const Color(0xFF262628) : const Color(0xFFE9E9EB)); // خاکستری آیفون
+        ? const Color(0xFF007AFF)
+        : (isDark ? const Color(0xFF262628) : const Color(0xFFE9E9EB));
 
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -206,7 +199,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            // دکمه پلاس با انیمیشن چرخش
             GestureDetector(
               onTap: () {
                 setState(() {
@@ -227,7 +219,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
             
             const SizedBox(width: 10),
             
-            // فیلد متنی
             Expanded(
               child: CupertinoTextField(
                 controller: _textController,
@@ -248,7 +239,6 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
             
             const SizedBox(width: 10),
             
-            // لاجیک دکمه ارسال / ویس
             if (_isComposing)
                GestureDetector(
                  onTap: () => _sendMessage(),
@@ -266,8 +256,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                  child: Container(
                    margin: const EdgeInsets.only(bottom: 6),
                    child: _isRecording 
-                      ? const Icon(CupertinoIcons.mic_fill, color: Colors.red, size: 28) // در حال ضبط
-                      : const Icon(CupertinoIcons.mic_fill, color: Colors.grey, size: 28), // عادی
+                      ? const Icon(CupertinoIcons.mic_fill, color: Colors.red, size: 28)
+                      : const Icon(CupertinoIcons.mic_fill, color: Colors.grey, size: 28),
                  ),
                ),
           ],
