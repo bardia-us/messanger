@@ -19,12 +19,11 @@ class SmsRepository {
   }
 
   Future<bool> requestPermissions() async {
-    // حذف میکروفون از لیست درخواست‌ها
     List<Permission> perms = [
       Permission.sms,
       Permission.contacts,
       Permission.phone,
-      Permission.camera, // برای ارسال عکس (فیک)
+      Permission.camera, 
       Permission.notification,
     ];
     await perms.request();
