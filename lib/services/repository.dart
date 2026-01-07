@@ -9,67 +9,72 @@ class SmsRepository {
   final SmsQuery _query = SmsQuery();
   final Map<String, String> _contactCache = {};
 
-  // --- نرمال‌سازی شماره (حل مشکل 09 و +98) ---
+  // نرمال‌سازی شماره تلفن برای یکی کردن +98 و 09
   String normalizePhone(String phone) {
-    // حذف تمام کاراکترهای غیر عددی به جز +
-    String clean = phone.replaceAll(RegExp(r'[^\d+]'), '');
-    
-    // اگر با +98 شروع میشه، بکنش 0
+    String clean = phone.replaceAll(RegExp(r'[^\d+]'), ''); // حذف فاصله و خط تیره
     if (clean.startsWith('+98')) {
-      clean = '0${clean.substring(3)}';
+      return '0${clean.substring(3)}';
+    } else if (clean.startsWith('98') && clean.length > 10) {
+      return '0${clean.substring(2)}';
+    } else if (clean.startsWith('9') && clean.length == 10) {
+      return '0$clean';
     }
-    // اگر با 98 (بدون مثبت) شروع میشه
-    else if (clean.startsWith('98')) {
-      clean = '0${clean.substring(2)}';
-    }
-    // اگر مستقیم با 9 شروع میشه (مثلا 912)
-    else if (clean.startsWith('9')) {
-      clean = '0$clean';
-    }
-    
     return clean;
   }
 
-  // درخواست دسترسی‌ها + دیفالت اپ
   Future<bool> requestPermissions() async {
-    // اول پرمیشن‌های خطرناک
+    // درخواست همه دسترسی‌های لازم برای دوربین، میکروفون و اس‌مس
     Map<Permission, PermissionStatus> statuses = await [
       Permission.sms,
       Permission.contacts,
       Permission.phone,
-      Permission.microphone, // برای ویس
-      Permission.notification, // برای نوتیفیکیشن
+      Permission.microphone,
+      Permission.camera,
+      Permission.notification,
     ].request();
 
-    bool essentialGranted = (statuses[Permission.sms]?.isGranted ?? false) &&
-                            (statuses[Permission.contacts]?.isGranted ?? false);
-
-    if (essentialGranted) {
-      // حالا چک کن ببین دیفالت هستیم یا نه
-      bool isDefault = await platform.invokeMethod('isDefaultSms');
-      if (!isDefault) {
-        try {
-          await platform.invokeMethod('requestDefaultSms');
-        } catch (e) {
-          print("Error requesting default SMS: $e");
-        }
+    bool smsGranted = statuses[Permission.sms]?.isGranted ?? false;
+    
+    if (smsGranted) {
+      // درخواست دیفالت شدن
+      try {
+         bool isDefault = await platform.invokeMethod('isDefaultSms');
+         if (!isDefault) {
+           await platform.invokeMethod('requestDefaultSms');
+         }
+      } catch (e) {
+        print("Error checking default SMS: $e");
       }
       return true;
     }
     return false;
   }
 
-  Future<List<SmsMessage>> getMessages({String? address}) async {
-    // اگر آدرس خاصی خواستیم، باید حواسمان به فرمت‌های مختلف باشد
-    // اما کتابخانه filter روی آدرس دقیق دارد. پس بهتره همه رو بگیریم و فیلتر کنیم
-    // یا اینکه بگذاریم خود کتابخانه کارش را بکند.
-    
-    List<SmsMessage> messages = await _query.querySms(
-      kinds: [SmsQueryKind.inbox, SmsQueryKind.sent],
-      address: address, // اگر نال باشد همه را می‌دهد
-      sort: true,
-    );
-    return messages;
+  // گرفتن تمام پیام‌ها بدون فیلتر آدرس (برای پر شدن اینباکس)
+  Future<List<SmsMessage>> getAllMessages() async {
+    try {
+      final messages = await _query.querySms(
+        kinds: [SmsQueryKind.inbox, SmsQueryKind.sent],
+        address: null, // نال یعنی همه پیام‌ها رو بده
+        count: -1, // -1 یعنی محدودیت تعداد نداشته باش
+        sort: true,
+      );
+      return messages;
+    } catch (e) {
+      print("Error fetching all messages: $e");
+      return [];
+    }
+  }
+
+  // گرفتن پیام‌های یک شخص خاص
+  Future<List<SmsMessage>> getThread(String address) async {
+    final all = await getAllMessages();
+    final target = normalizePhone(address);
+    // فیلتر دستی قدرتمند
+    return all.where((msg) {
+      if (msg.address == null) return false;
+      return normalizePhone(msg.address!) == target;
+    }).toList();
   }
 
   Future<void> sendSms(String address, String body, int? subId) async {
@@ -80,8 +85,8 @@ class SmsRepository {
         'subId': subId,
       });
     } on PlatformException catch (e) {
-      print("Failed to send SMS via Native: ${e.message}");
-      throw e; // خطا را پرتاب کن تا در UI بفهمیم
+      print("Native Send Error: ${e.message}");
+      throw e;
     }
   }
 
@@ -90,34 +95,33 @@ class SmsRepository {
       final List result = await platform.invokeMethod('getSimCards');
       return result.cast<Map<String, dynamic>>();
     } on PlatformException catch (e) {
-      print("Failed to get SIM cards: ${e.message}");
       return [];
     }
   }
 
   Future<String?> getContactName(String address) async {
-    String normalizedAddr = normalizePhone(address);
-    if (_contactCache.containsKey(normalizedAddr)) return _contactCache[normalizedAddr];
+    String normalized = normalizePhone(address);
+    if (_contactCache.containsKey(normalized)) return _contactCache[normalized];
 
     try {
-      // این بخش سنگین است، بهتر است یک بار کش شود
-      final contact = await FlutterContacts.getContact(normalizedAddr);
+      // تلاش برای پیدا کردن نام با فرمت‌های مختلف
+      final contact = await FlutterContacts.getContact(normalized);
       if (contact != null) {
-         _contactCache[normalizedAddr] = contact.displayName;
-         return contact.displayName;
+        _contactCache[normalized] = contact.displayName;
+        return contact.displayName;
       }
     } catch (e) {
-      // خطا در گرفتن کانتکت
+      // ignore
     }
-    return null;
+    return null; // اگر پیدا نشد نال برگردون تا خود شماره نمایش داده بشه
   }
 
   Color generateColor(String address) {
     final colors = [
       CupertinoColors.systemIndigo, CupertinoColors.systemPink, CupertinoColors.systemGreen,
       CupertinoColors.systemTeal, CupertinoColors.systemOrange, CupertinoColors.systemPurple,
-      CupertinoColors.systemBlue, CupertinoColors.systemRed
+      const Color(0xFF007AFF), const Color(0xFFFF3B30)
     ];
-    return colors[normalizePhone(address).hashCode % colors.length];
+    return colors[address.hashCode % colors.length];
   }
 }
