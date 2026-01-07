@@ -36,7 +36,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      _loadConversations(); // رفرش لیست وقتی برگشتیم به برنامه
+      _loadConversations();
     }
   }
 
@@ -52,7 +52,6 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
     try {
       final messages = await _repo.getAllMessages();
       
-      // گروه‌بندی پیام‌ها بر اساس شماره نرمال شده
       Map<String, SmsMessage> threads = {};
       
       for (var msg in messages) {
@@ -60,13 +59,13 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
         
         String key = _repo.normalizePhone(msg.address!);
         
-        // نگه داشتن جدیدترین پیام هر مکالمه
         if (!threads.containsKey(key)) {
           threads[key] = msg;
         } else {
-          // اگر تاریخ پیام فعلی از چیزی که ذخیره کردیم جدیدتر بود
-          int current = msg.date ?? 0;
-          int saved = threads[key]!.date ?? 0;
+          // *** FIX: Cast explicit ***
+          int current = (msg.date as int?) ?? 0;
+          int saved = (threads[key]!.date as int?) ?? 0;
+          
           if (current > saved) {
             threads[key] = msg;
           }
@@ -79,17 +78,17 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
         String? name = await _repo.getContactName(key);
         
         result.add(ConversationDisplayItem(
-          originalAddress: msg.address!, // آدرس اصلی برای ارسال
+          originalAddress: msg.address!,
           normalizedAddress: key,
-          name: name, // اگر نال باشد در مدل هندل می‌شود
+          name: name,
           message: msg.body ?? "No Text",
-          date: msg.date ?? 0,
+          // *** FIX: Cast explicit ***
+          date: (msg.date as int?) ?? 0,
           isRead: msg.read ?? false,
           avatarColor: _repo.generateColor(key),
         ));
       }
 
-      // مرتب سازی بر اساس تاریخ (جدیدترین بالا)
       result.sort((a, b) => b.date.compareTo(a.date));
 
       if (mounted) {
@@ -123,7 +122,6 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
               padding: EdgeInsets.zero,
               child: const Icon(CupertinoIcons.square_pencil),
               onPressed: () {
-                // دیالوگ نوشتن پیام جدید (ساده شده)
                 Navigator.of(context).push(CupertinoPageRoute(
                   builder: (_) => const ChatScreen(address: "", name: "New Message")
                 )).then((_) => _loadConversations());
@@ -172,7 +170,7 @@ class _InboxScreenState extends State<InboxScreen> with WidgetsBindingObserver {
             builder: (_) => ChatScreen(address: item.originalAddress, name: item.displayName),
           ),
         );
-        _loadConversations(); // رفرش وقتی برگشت
+        _loadConversations();
       },
       child: Container(
         color: isDark ? Colors.black : Colors.white,
