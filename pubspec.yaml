@@ -18,11 +18,10 @@ dependencies:
   url_launcher: ^6.2.1
   flutter_local_notifications: ^17.0.0
   provider: ^6.1.1
-  # پکیج‌های جدید برای کار کردن واقعی دکمه‌ها
-  image_picker: ^1.0.7 # برای دوربین و گالری
-  record: ^5.1.0 # برای ضبط صدا
-  path_provider: ^2.1.2 # برای ذخیره فایل صدا
-  audioplayers: ^6.0.0 # برای پخش صدا (اختیاری ولی خوبه باشه)
+  image_picker: ^1.0.7
+  record: 5.0.4 # نسخه پایدار و فیکس شده
+  path_provider: ^2.1.2
+  audioplayers: ^6.0.0
 
 dev_dependencies:
   flutter_test:
