@@ -19,7 +19,7 @@ dependencies:
   flutter_local_notifications: ^17.0.0
   provider: ^6.1.1
   image_picker: ^1.0.7
-  record: 5.0.4 # نسخه پایدار و فیکس شده
+  record: ^4.4.4 # نسخه پایدار و بدون باگ
   path_provider: ^2.1.2
   audioplayers: ^6.0.0
 
