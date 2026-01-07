@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_sms_inbox/flutter_sms_inbox.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:record/record.dart';
+import 'package:record/record.dart'; // نسخه 4.4.4
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart' hide TextDirection;
@@ -26,7 +26,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final ImagePicker _picker = ImagePicker();
-  final AudioRecorder _audioRecorder = AudioRecorder();
+  
+  // تغییر برای نسخه 4
+  final Record _audioRecorder = Record();
 
   List<ChatMessageDisplay> _messages = [];
   bool _isComposing = false;
@@ -46,6 +48,15 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     _loadMessages();
   }
 
+  @override
+  void dispose() {
+    _audioRecorder.dispose(); // آزاد کردن منابع
+    _plusController.dispose();
+    _textController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
   void _loadMessages() async {
     final rawMsgs = await _repo.getThread(widget.address);
     if (!mounted) return;
@@ -61,15 +72,11 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   List<ChatMessageDisplay> _processMessages(List<SmsMessage> raw) {
     List<ChatMessageDisplay> result = [];
-    
-    // *** FIX: Cast explicit ***
     raw.sort((a, b) => ((a.date as int?) ?? 0).compareTo((b.date as int?) ?? 0));
     
     DateTime? lastDate;
     for (var msg in raw) {
-      // *** FIX: Cast explicit ***
       final date = DateTime.fromMillisecondsSinceEpoch((msg.date as int?) ?? 0);
-      
       if (lastDate == null || date.difference(lastDate).inDays >= 1) {
         result.add(ChatMessageDisplay.divider(DateFormat('MMM d').format(date)));
       }
@@ -117,10 +124,16 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   }
 
   Future<void> _startRecording() async {
+    // تغییر سینتکس برای نسخه 4
     if (await _audioRecorder.hasPermission()) {
       final tempDir = await getTemporaryDirectory();
       final path = '${tempDir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
-      await _audioRecorder.start(const RecordConfig(), path: path);
+      
+      await _audioRecorder.start(
+        path: path,
+        encoder: AudioEncoder.aacLc,
+      );
+      
       setState(() => _isRecording = true);
       HapticFeedback.mediumImpact();
     }
@@ -128,7 +141,9 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   Future<void> _stopRecording() async {
     if (!_isRecording) return;
+    // تغییر سینتکس برای نسخه 4
     final path = await _audioRecorder.stop();
+    
     setState(() => _isRecording = false);
     if (path != null) {
       HapticFeedback.mediumImpact();
