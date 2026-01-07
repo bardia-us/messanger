@@ -3,9 +3,9 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_sms_inbox/flutter_sms_inbox.dart';
-import 'package:image_picker/image_picker.dart'; // واقعی
-import 'package:record/record.dart'; // واقعی
-import 'package:path_provider/path_provider.dart'; // واقعی
+import 'package:image_picker/image_picker.dart';
+import 'package:record/record.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'dart:ui' as ui;
@@ -47,14 +47,11 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   }
 
   void _loadMessages() async {
-    // استفاده از getThread برای گرفتن تمام پیام‌های این شخص
     final rawMsgs = await _repo.getThread(widget.address);
-    
     if (!mounted) return;
     setState(() {
       _messages = _processMessages(rawMsgs);
     });
-    // اسکرول به پایین
     Future.delayed(const Duration(milliseconds: 100), () {
       if (_scrollController.hasClients) {
         _scrollController.jumpTo(0);
@@ -64,11 +61,15 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   List<ChatMessageDisplay> _processMessages(List<SmsMessage> raw) {
     List<ChatMessageDisplay> result = [];
-    raw.sort((a, b) => (a.date ?? 0).compareTo(b.date ?? 0));
+    
+    // *** FIX: Cast explicit ***
+    raw.sort((a, b) => ((a.date as int?) ?? 0).compareTo((b.date as int?) ?? 0));
     
     DateTime? lastDate;
     for (var msg in raw) {
-      final date = DateTime.fromMillisecondsSinceEpoch(msg.date ?? 0);
+      // *** FIX: Cast explicit ***
+      final date = DateTime.fromMillisecondsSinceEpoch((msg.date as int?) ?? 0);
+      
       if (lastDate == null || date.difference(lastDate).inDays >= 1) {
         result.add(ChatMessageDisplay.divider(DateFormat('MMM d').format(date)));
       }
@@ -87,20 +88,16 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
     try {
       await _repo.sendSms(widget.address, body, null);
-      // ریلود بعد از ارسال
       Future.delayed(const Duration(seconds: 2), _loadMessages);
     } catch (e) {
       _showError("Failed to send message");
     }
   }
 
-  // --- دکمه‌های واقعی ---
   Future<void> _openCamera() async {
     try {
       final XFile? photo = await _picker.pickImage(source: ImageSource.camera);
       if (photo != null) {
-        // چون SMS نمیتونه عکس بفرسته، ما فقط متن می‌فرستیم که عکس ضمیمه شده (محدودیت SMS)
-        // برای ارسال واقعی عکس باید MMS پیاده‌سازی بشه که خیلی پیچیده است.
         _sendMessage(customBody: "[Image Sent: ${photo.name}]");
       }
     } catch (e) {
@@ -119,12 +116,10 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     }
   }
 
-  // --- ضبط صدا واقعی ---
   Future<void> _startRecording() async {
     if (await _audioRecorder.hasPermission()) {
       final tempDir = await getTemporaryDirectory();
       final path = '${tempDir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
-      
       await _audioRecorder.start(const RecordConfig(), path: path);
       setState(() => _isRecording = true);
       HapticFeedback.mediumImpact();
@@ -135,10 +130,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     if (!_isRecording) return;
     final path = await _audioRecorder.stop();
     setState(() => _isRecording = false);
-    
     if (path != null) {
       HapticFeedback.mediumImpact();
-      // ارسال پیام صوتی (به صورت متن، چون پروتکل SMS فایل قبول نمیکنه)
       _sendMessage(customBody: "[Voice Message: 0:05]"); 
     }
   }
