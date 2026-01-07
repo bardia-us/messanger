@@ -8,93 +8,126 @@ import 'package:flutter/cupertino.dart';
 class SmsRepository {
   static const platform = MethodChannel('com.example.messages/sms');
   final SmsQuery _query = SmsQuery();
-  final Map<String, String> _contactCache = {};
+  
+  // کش برای سرعت بالا
+  static final Map<String, String> _nameCache = {};
 
-  String normalizePhone(String phone) {
-    String clean = phone.replaceAll(RegExp(r'[^\d+]'), '');
-    if (clean.startsWith('+98')) return '0${clean.substring(3)}';
-    if (clean.startsWith('98') && clean.length > 10) return '0${clean.substring(2)}';
-    if (clean.startsWith('9') && clean.length == 10) return '0$clean';
-    return clean;
+  String normalize(String phone) {
+    String p = phone.replaceAll(RegExp(r'[^\d+]'), '');
+    if (p.startsWith('+98')) return '0${p.substring(3)}';
+    if (p.startsWith('98') && p.length > 10) return '0${p.substring(2)}';
+    if (p.startsWith('9') && p.length == 10) return '0$p';
+    return p;
   }
 
-  Future<bool> requestPermissions() async {
-    List<Permission> perms = [
+  Future<bool> checkAndRequestPermissions() async {
+    // لیست دقیق پرمیشن‌ها
+    var statuses = await [
       Permission.sms,
       Permission.contacts,
       Permission.phone,
-      Permission.camera, 
+      Permission.microphone,
       Permission.notification,
-    ];
-    await perms.request();
-    
-    if (await Permission.sms.isGranted) {
+    ].request();
+
+    bool sms = statuses[Permission.sms]?.isGranted ?? false;
+    bool contacts = statuses[Permission.contacts]?.isGranted ?? false;
+
+    if (sms) {
       try {
-         bool isDefault = await platform.invokeMethod('isDefaultSms');
-         if (!isDefault) await platform.invokeMethod('requestDefaultSms');
+        bool isDef = await platform.invokeMethod('isDefaultSms');
+        if (!isDef) await platform.invokeMethod('requestDefaultSms');
       } catch (e) {
-        print("Error checking default SMS: $e");
+        debugPrint("Default SMS Error: $e");
       }
-      return true;
     }
-    return false;
+    return sms && contacts;
   }
 
-  Future<List<SmsMessage>> getAllMessages() async {
+  Future<List<ConversationItem>> getConversations() async {
     try {
-      return await _query.querySms(
+      final msgs = await _query.querySms(
         kinds: [SmsQueryKind.inbox, SmsQueryKind.sent],
         sort: true,
       );
+
+      Map<String, SmsMessage> threads = {};
+      
+      for (var m in msgs) {
+        if (m.address == null) continue;
+        String key = normalize(m.address!);
+        
+        // فقط جدیدترین پیام هر شخص
+        if (!threads.containsKey(key)) {
+          threads[key] = m;
+        }
+      }
+
+      List<ConversationItem> items = [];
+      for (var key in threads.keys) {
+        var m = threads[key]!;
+        String? name = await _getName(key);
+        
+        items.add(ConversationItem(
+          id: m.id.toString(),
+          address: m.address!,
+          displayId: key,
+          name: name,
+          snippet: m.body ?? "",
+          date: m.date ?? 0,
+          isRead: m.read ?? false,
+          color: _getColor(key),
+        ));
+      }
+      
+      // مرتب‌سازی زمانی
+      items.sort((a, b) => b.date.compareTo(a.date));
+      return items;
+      
     } catch (e) {
       return [];
     }
   }
 
-  Future<List<SmsMessage>> getThread(String address) async {
-    final all = await getAllMessages();
-    final target = normalizePhone(address);
-    return all.where((msg) {
-      if (msg.address == null) return false;
-      return normalizePhone(msg.address!) == target;
-    }).toList();
+  Future<List<ChatBubbleModel>> getChatDetails(String address) async {
+    final all = await _query.querySms(
+      kinds: [SmsQueryKind.inbox, SmsQueryKind.sent],
+      sort: true,
+    );
+    
+    String target = normalize(address);
+    List<SmsMessage> filtered = all.where((m) => 
+      m.address != null && normalize(m.address!) == target
+    ).toList();
+
+    return filtered.map((m) => ChatBubbleModel.fromSms(m)).toList();
   }
 
-  Future<void> sendSms(String address, String body, int? subId) async {
+  Future<void> sendSms(String address, String text) async {
     await platform.invokeMethod('sendSms', {
       'address': address,
-      'body': body,
-      'subId': subId,
+      'body': text,
+      'subId': null,
     });
   }
 
-  Future<List<Map<String, dynamic>>> getSimCards() async {
+  Future<String?> _getName(String phone) async {
+    if (_nameCache.containsKey(phone)) return _nameCache[phone];
     try {
-      final List result = await platform.invokeMethod('getSimCards');
-      return result.cast<Map<String, dynamic>>();
-    } catch (e) {
-      return [];
-    }
-  }
-
-  Future<String?> getContactName(String address) async {
-    String normalized = normalizePhone(address);
-    if (_contactCache.containsKey(normalized)) return _contactCache[normalized];
-    try {
-      final contact = await FlutterContacts.getContact(normalized);
-      if (contact != null) {
-        _contactCache[normalized] = contact.displayName;
-        return contact.displayName;
+      final c = await FlutterContacts.getContact(phone);
+      if (c != null) {
+        _nameCache[phone] = c.displayName;
+        return c.displayName;
       }
-    } catch (e) {}
+    } catch (_) {}
     return null;
   }
 
-  Color generateColor(String address) {
+  Color _getColor(String key) {
     final colors = [
-      CupertinoColors.systemIndigo, CupertinoColors.systemPink, CupertinoColors.systemGreen,
-      CupertinoColors.systemTeal, CupertinoColors.systemOrange, CupertinoColors.systemPurple,
+       CupertinoColors.systemBlue, CupertinoColors.systemIndigo, 
+       CupertinoColors.systemPink, CupertinoColors.systemTeal
     ];
-    return colors[address.hashCode % colors.length];
+    return colors[key.hashCode % colors.length];
   }
 }
