@@ -27,7 +27,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   final ScrollController _scrollController = ScrollController();
   final ImagePicker _picker = ImagePicker();
   
-  // سینتکس نسخه 5:
+  // در نسخه 5 نام کلاس به AudioRecorder تغییر کرده است
   final AudioRecorder _audioRecorder = AudioRecorder();
 
   List<ChatMessageDisplay> _messages = [];
@@ -50,7 +50,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
   @override
   void dispose() {
-    _audioRecorder.dispose();
+    _audioRecorder.dispose(); // حتما باید دیسپوز شود
     _plusController.dispose();
     _textController.dispose();
     _scrollController.dispose();
@@ -63,13 +63,17 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     setState(() {
       _messages = _processMessages(rawMsgs);
     });
+    // اسکرول به پایین
     Future.delayed(const Duration(milliseconds: 100), () {
-      if (_scrollController.hasClients) _scrollController.jumpTo(0);
+      if (_scrollController.hasClients) {
+        _scrollController.jumpTo(0);
+      }
     });
   }
 
   List<ChatMessageDisplay> _processMessages(List<SmsMessage> raw) {
     List<ChatMessageDisplay> result = [];
+    // مرتب‌سازی با کست دقیق
     raw.sort((a, b) => ((a.date as int?) ?? 0).compareTo((b.date as int?) ?? 0));
     
     DateTime? lastDate;
@@ -102,37 +106,55 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   Future<void> _openCamera() async {
     try {
       final XFile? photo = await _picker.pickImage(source: ImageSource.camera);
-      if (photo != null) _sendMessage(customBody: "[Image Sent: ${photo.name}]");
-    } catch (e) { print(e); }
+      if (photo != null) {
+        _sendMessage(customBody: "[Image Sent: ${photo.name}]");
+      }
+    } catch (e) {
+      print(e);
+    }
   }
 
   Future<void> _openGallery() async {
     try {
       final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
-      if (image != null) _sendMessage(customBody: "[Photo Shared]");
-    } catch (e) { print(e); }
+      if (image != null) {
+        _sendMessage(customBody: "[Photo Shared]");
+      }
+    } catch (e) {
+      print(e);
+    }
   }
 
   Future<void> _startRecording() async {
-    if (await _audioRecorder.hasPermission()) {
-      final tempDir = await getTemporaryDirectory();
-      final path = '${tempDir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
-      
-      // سینتکس نسخه 5:
-      await _audioRecorder.start(const RecordConfig(), path: path);
-      
-      setState(() => _isRecording = true);
-      HapticFeedback.mediumImpact();
+    try {
+      if (await _audioRecorder.hasPermission()) {
+        final tempDir = await getTemporaryDirectory();
+        final path = '${tempDir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+        
+        // سینتکس نسخه 5 برای شروع ضبط
+        await _audioRecorder.start(const RecordConfig(), path: path);
+        
+        setState(() => _isRecording = true);
+        HapticFeedback.mediumImpact();
+      }
+    } catch (e) {
+      print("Error starting record: $e");
     }
   }
 
   Future<void> _stopRecording() async {
     if (!_isRecording) return;
-    final path = await _audioRecorder.stop();
-    setState(() => _isRecording = false);
-    if (path != null) {
-      HapticFeedback.mediumImpact();
-      _sendMessage(customBody: "[Voice Message]"); 
+    try {
+      final path = await _audioRecorder.stop();
+      setState(() => _isRecording = false);
+      
+      if (path != null) {
+        HapticFeedback.mediumImpact();
+        // ارسال ویس به صورت پیام متنی (چون SMS مدیا ساپورت نمیکنه)
+        _sendMessage(customBody: "[Voice Message: 0:05]"); 
+      }
+    } catch (e) {
+      print("Error stopping record: $e");
     }
   }
 
@@ -168,6 +190,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                 _buildInputArea(isDark),
               ],
             ),
+            
             if (_isPlusOpen) _buildPlusMenu(isDark),
             if (_isRecording) _buildRecordingOverlay(),
           ],
