@@ -5,7 +5,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:record/record.dart'; // نسخه 4.4.4
+import 'package:record/record.dart'; // نسخه 5
 import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:vibration/vibration.dart';
@@ -30,8 +30,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   final ScrollController _scrollController = ScrollController();
   final ImagePicker _picker = ImagePicker();
   
-  // نسخه 4 از کلاس Record استفاده میکند
-  final Record _audioRecorder = Record();
+  // در نسخه 5 نام کلاس AudioRecorder است
+  final AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _audioPlayer = AudioPlayer();
   
   List<ChatBubbleModel> _messages = [];
@@ -77,6 +77,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
 
     try {
       await _repo.sendSms(widget.address, body);
+      
       setState(() {
         _messages.insert(0, ChatBubbleModel(
           id: "temp",
@@ -85,12 +86,14 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
           isMe: true,
         ));
       });
+      
       Future.delayed(const Duration(seconds: 2), _loadMessages);
     } catch (e) {
-      // Error
+      // Error handling
     }
   }
 
+  // --- Voice Logic (نسخه 5) ---
   Future<void> _startRecording() async {
     if (await _audioRecorder.hasPermission()) {
       Vibration.vibrate(duration: 50);
@@ -98,9 +101,8 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
       final dir = await getTemporaryDirectory();
       final path = '${dir.path}/audio_${DateTime.now().millisecondsSinceEpoch}.m4a';
       
-      // سینتکس نسخه 4: فقط path میگیره (بدون config)
-      await _audioRecorder.start(path: path);
-      
+      // سینتکس نسخه 5:
+      await _audioRecorder.start(const RecordConfig(), path: path);
       setState(() => _isRecording = true);
     }
   }
@@ -113,7 +115,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
     Vibration.vibrate(duration: 50);
     
     if (path != null) {
-      _sendMessage(text: "[Voice Message]");
+      _sendMessage(text: "[Voice Message: ${path.split('/').last}]");
     }
   }
 
@@ -163,7 +165,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
   Widget _buildBubble(ChatBubbleModel item, bool isDark) {
     final isMe = item.isMe;
     final bubbleColor = isMe 
-        ? const Color(0xFF007AFF)
+        ? const Color(0xFF007AFF) 
         : (isDark ? const Color(0xFF262628) : const Color(0xFFE9E9EB));
 
     return Align(
@@ -256,7 +258,7 @@ class _ChatScreenState extends State<ChatScreen> with SingleTickerProviderStateM
                  child: Container(
                    margin: const EdgeInsets.only(bottom: 6),
                    child: _isRecording 
-                      ? const Icon(CupertinoIcons.mic_fill, color: Colors.red, size: 28)
+                      ? const Icon(CupertinoIcons.mic_fill, color: Colors.red, size: 28) 
                       : const Icon(CupertinoIcons.mic_fill, color: Colors.grey, size: 28),
                  ),
                ),
