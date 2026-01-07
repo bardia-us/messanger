@@ -20,10 +20,8 @@ dependencies:
   flutter_contacts: ^1.1.7+1
   
   image_picker: ^1.0.7
-  record: ^4.4.4 # نسخه 4 پایدارترین است
-  audioplayers: ^5.2.1
+  # record و audioplayers حذف شدند چون باعث ارور بیلد میشدن
   path_provider: ^2.1.2
-  # vibration حذف شد (از HapticFeedback استفاده میکنیم)
 
 dev_dependencies:
   flutter_test:
