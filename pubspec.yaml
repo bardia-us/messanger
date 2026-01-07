@@ -20,10 +20,15 @@ dependencies:
   flutter_contacts: ^1.1.7+1
   
   image_picker: ^1.0.7
-  record: ^4.4.4 # نسخه پایدار
-  audioplayers: ^5.2.1
+  record: ^5.2.0 # نسخه جدید برای حل مشکل اندروید
+  audioplayers: ^6.0.0
   path_provider: ^2.1.2
   vibration: ^1.8.4
+
+# بخش مهم: اجبار کردن نسخه‌های هماهنگ برای جلوگیری از ارور لینوکس
+dependency_overrides:
+  record_linux: ^1.2.1
+  record_platform_interface: ^1.4.0
 
 dev_dependencies:
   flutter_test:
